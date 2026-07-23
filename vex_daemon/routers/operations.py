@@ -3,7 +3,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from ..operations import db_inspect, fleet_status, pulse, ship
+from operations import db_inspect, fleet_status, pulse, ship
 
 router = APIRouter(prefix="/ops", tags=["ops"])
 

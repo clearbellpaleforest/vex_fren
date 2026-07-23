@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from ..harness_builder import PATTERNS, build_harness, suggest_pattern
+from harness_builder import PATTERNS, build_harness, suggest_pattern
 
 router = APIRouter(prefix="/harness", tags=["harness"])
 
@@ -37,7 +37,7 @@ class SuggestResponse(BaseModel):
 @router.post("/suggest", response_model=SuggestResponse)
 async def suggest(req: SuggestRequest):
     """Suggest the best architecture pattern for a domain."""
-    from ..harness_builder import DOMAIN_PATTERN_MAP
+    from harness_builder import DOMAIN_PATTERN_MAP
 
     domain_lower = req.domain.lower()
     scores = {}
