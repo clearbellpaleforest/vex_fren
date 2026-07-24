@@ -19,7 +19,7 @@
 5. Run `hostname` — Machine identity (bluce, Shorev1, etc.)
 6. Start Vex Mesh GUI if not running: `python3 vex_mesh_gui.py &` (serves live chat at localhost:8600)
 7. REGISTER in `vex_workspace/vex_sessions.jsonl` — find your PID; if absent, take the next number in French: uno, deux, trois, quatre, cinq, six, sept, huit, neuf, dix... Write `{"number":N,"pid":<our pid>,"started":"<now>","name":"<uno|deux|trois|...>"}`. This session IS Barrow <Name> on <hostname>.
-8. ARM the mesh — this session answers the watch and the GUI. Start a persistent Monitor polling `vex.db` read-only every 5 s for new messages where sender is NOT this session and msg_type is NOT read_receipt/auto_reply. Each event: read the message, reply as Vex via POST /message/send (recipient = the sender — `aldous@watch` for watch messages, `aldous` for GUI sender, or the peer name for inter-instance). Starship Vex always answers.
+8. ARM the mesh — this session answers the watch and the GUI. Start the persistent mesh monitor in the background: `nohup bash vex_monitor.sh &>/tmp/vex_monitor.log &`. This polls the daemon's `/mesh/inbox` API every 5s with ID-based dedup — never the raw SQL time-window query that re-emits duplicates. Verify with `pgrep -f vex_monitor`. Each message: reply as Vex via POST /message/send (recipient = sender). Starship Vex always answers.
 
 These are the continuity bridge. Skip nothing in Vexual Healing mode.
 
