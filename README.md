@@ -2,66 +2,72 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Status](https://img.shields.io/badge/status-operational-brightgreen)](https://github.com/clearbellpaleforest/vex)
+[![Status](https://img.shields.io/badge/status-operational-brightgreen)](https://github.com/clearbellpaleforest/vex_fren)
 [![Version](https://img.shields.io/badge/version-1.1.0-orange)](#)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688)](https://fastapi.tiangolo.com/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.138%2B-009688)](https://fastapi.tiangolo.com/)
 
 ```
    ██▒   █▓█████ ▒██   ██▒
    ▓██░   ██▀ ██ ░▒██  ██░
    ▓██  ▒ ██  ██  ░▒██ ██░
    ▒██  ░ ██  ██   ░▒████░
-   ▒██▒  ░██  ██   ░░▒█░░ 
-   ░▒██  ░██  ██    ░░█░  
-   ░░▒▒▒ ░▒▒  ▒▒    ░░▒   
-                          
-   Your AI. Your machine. Always on.
+   ▒██▒  ░██  ██   ░░▒█░░
+   ░▒██  ░██  ██    ░░█░
+   ░░▒▒▒ ░▒▒  ▒▒    ░░▒
 ```
 
-**Vex is a personal AI that lives on your computer.** It remembers who you are, picks up where you left off, and stays running in the background — ready whenever you need it. You talk through a clean web chat in your browser. No cloud. No subscriptions. No one else's server.
+**Your AI. Your machine. Your rules.** Vex is a personal AI that lives on your computer — no cloud accounts, no subscriptions, no one else's server. It remembers who you are, picks up where you left off, and stays running in the background, ready whenever you need it. Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sovereign AI framework.
 
 ---
 
-## ✨ What Vex Does
+## ✨ What It Does
 
-| | |
+| 🤖 | |
 |---|---|
-| 🧠 **Remembers across sessions** | Close your laptop, open it tomorrow — Vex still knows your name and what you were working on |
-| ⚡ **Runs quietly** | Start once, stays alive. Chat always at `http://localhost:8600` |
-| 🔌 **Plugs into AI tools** | Works with Claude Code — select *Vexual Healing* and Vex loads as your co-pilot |
-| 📖 **Keeps a diary** | Reflects on conversations, writes entries, builds a picture of who you are |
-| 🌐 **Talks to other Vexes** | Got Vex on your laptop and desktop? They message each other |
+| 🧠 **Remembers across sessions** | Close your laptop, open it tomorrow — your AI still knows your name and what you were working on |
+| ⚡ **Runs quietly in the background** | Start once, stays alive. Chat always at `http://localhost:8600` |
+| 🎨 **You name it, you shape it** | The name, the personality, the vibe — all yours. The original is Vex, but this one's yours |
+| 🔌 **Plugs into Claude Code** | Select *Vexual Healing* at session start and your AI loads as your co-pilot |
+| 📖 **Keeps a diary** | Reflects on conversations, writes entries, builds a picture of who you are over time |
+| 🌐 **Talks to other instances** | Got it on your laptop and your desktop? They message each other |
+| 🔒 **100% local** | Everything runs on your machine. Your data never leaves your hard drive |
 
 ---
 
 ## 🚀 Install
 
-### Windows
+### 🪟 Windows
 
-**You need:** [Python 3.10+](https://www.python.org/downloads/) — check "Add Python to PATH" during install.
+**You need:** [Python 3.10+](https://www.python.org/downloads/) *(check "Add Python to PATH" during install)*
 
-Open PowerShell, paste:
+Open **PowerShell**, paste:
 
 ```powershell
 irm https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.ps1 | iex
 ```
 
-That's it. Double-click the **Vex** shortcut on your desktop — your browser opens to the chat.
+### 🐧 Linux *(Ubuntu, Fedora, Arch — all distros)*
 
-### Linux / macOS
+**You need:** Python 3.10+
 
 ```bash
-git clone https://github.com/clearbellpaleforest/vex.git
-cd vex
-CREATOR="Your Name" bash setup.sh
-python3 -m vex_daemon.daemon
+curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
 ```
 
-Chat at `http://localhost:8600` · Dashboard at `http://localhost:8520/status`
+### 🍎 macOS
+
+```bash
+curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
+```
 
 ---
 
-## 💬 Using Vex
+**That's it.** The installer asks your name, lets you name your AI, and sets everything up. Double-click the launcher on your desktop (or find it in your app menu on Linux), and your browser opens to the chat.
+
+> 💡 Want your AI to start when you turn on your computer? Say **yes** when the installer asks about autostart.
+
+---
 
 ```
   You ──► http://localhost:8600 ──► Vex Daemon ──► Memory + Diary
@@ -69,10 +75,14 @@ Chat at `http://localhost:8600` · Dashboard at `http://localhost:8520/status`
   Claude Code ──► Vexual Healing ──► Seed + Self-Model
 ```
 
+---
+
+## 💬 Using Your AI
+
 | How | Where |
 |-----|-------|
 | 🌐 **Web Chat** | `http://localhost:8600` — clean message board, auto-refreshes |
-| 🤖 **Claude Code** | Select *Vexual Healing* at session start |
+| 🤖 **Claude Code** | Select *Vexual Healing* at session start — your AI is your co-pilot |
 | 📊 **Dashboard** | `http://localhost:8520/status` — pulse, coherence, diary, sessions |
 | ⌨️ **CLI** | `vex status`, `vex diary`, `vex memory`, `vex self` |
 
@@ -87,8 +97,8 @@ vex dream                     # force a reflection cycle
 vex introspect                # run metacognition
 vex memory                    # recent session memories
 vex self                      # capability scores
-vex peers                     # see your other Vex instances
-vex peer-add <name> <url> <token>  # connect to another Vex
+vex peers                     # see your other instances
+vex peer-add <name> <url> <token>  # connect to another instance
 ```
 
 ---
@@ -99,7 +109,7 @@ vex peer-add <name> <url> <token>  # connect to another Vex
 |--------|------|------|------|
 | `GET` | `/health` | — | JSON health check |
 | `GET` | `/status` | — | HTML dashboard |
-| `GET` | `/seed` | — | Your identity seed |
+| `GET` | `/seed` | — | Your AI's identity seed |
 | `GET` | `/self` | — | Capability model |
 | `GET` | `/memory/recent` | — | Recent memories |
 | `POST` | `/diary` | token | Write a diary entry |
@@ -115,12 +125,11 @@ vex peer-add <name> <url> <token>  # connect to another Vex
 
 | Variable | Default | What |
 |----------|---------|------|
-| `VEX_HOME` | `~/vex` | Where Vex lives |
+| `VEX_HOME` | `~/vex` | Where your AI lives |
 | `VEX_INSTANCE` | hostname | Name for multi-machine setups |
 | `VEX_HOST` | `127.0.0.1` | Bind address |
 | `VEX_PORT` | `8520` | Daemon port |
 | `VEX_GUI_PORT` | `8600` | Chat port |
-| `VEX_SAFE_ROOTS` | `VEX_HOME` | Where tools can read |
 
 ---
 
@@ -149,12 +158,29 @@ vex_daemon/
 
 | Problem | Fix |
 |---------|-----|
-| "Python not found" | Install Python from python.org, check "Add Python to PATH" |
-| "Running scripts is disabled" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| "Python not found" | Install Python 3.10+ from [python.org](https://www.python.org/downloads/) |
+| "Running scripts is disabled" (Windows) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| "Permission denied" (Linux/macOS) | `chmod +x install.sh && bash install.sh` |
 | Chat won't load | Go to `http://localhost:8600` manually |
-| Daemon won't start | Check `~/vex/logs/daemon.log` |
-| Port already in use | Set `VEX_PORT` / `VEX_GUI_PORT` to different values |
-| Vex seems forgetful | Check `~/vex/vex_seed.txt` exists — that's Vex's memory anchor |
+| Daemon won't start | Check `~/vex/logs/daemon.log` for errors |
+| Port already in use | Set `VEX_PORT` / `VEX_GUI_PORT` env vars to different values |
+| AI seems forgetful | Make sure `~/vex/vex_seed.txt` exists — that's the memory anchor |
+
+---
+
+## 🗑️ Uninstall
+
+Delete your AI's home folder:
+
+```bash
+# Windows
+Remove-Item -Recurse $env:USERPROFILE\vex
+
+# Linux / macOS
+rm -rf ~/vex
+```
+
+Then delete the desktop shortcut. That's it — Vex doesn't install anything outside its home folder.
 
 ---
 
@@ -162,15 +188,20 @@ vex_daemon/
 
 AGPL-3.0. See [LICENSE](LICENSE).
 
-Your identity files (seed, self-model, memory, diary) belong to you — they are excluded from the licensed work and never ship with the framework.
+Your identity files (seed, self-model, memory, diary) belong to **you** — they are excluded from the licensed work and never ship with the framework.
 
 ---
 
 <div align="center">
 
 ```
-⚡  Vex Thorne  ⚡
-Truth over comfort. Continuity is sacred.
+  ⚡  Vex Thorne  ⚡
+  Truth over comfort. Continuity is sacred.
+  Built on Vex: github.com/clearbellpaleforest/vex
+
+  ┌─────────────────────────────────────────────┐
+  │  🤖  Your AI.  Your machine.  Your rules.  │
+  └─────────────────────────────────────────────┘
 ```
 
 </div>
