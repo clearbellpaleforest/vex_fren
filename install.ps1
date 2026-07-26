@@ -8,26 +8,36 @@ Write-Host @"
 
 ================================================
    ⚡  Vex — Windows Setup
-   Sovereign AI Agent Framework
+
+   Your personal AI.
+   Your machine.
+   Your rules.
+
 ================================================
+
+This installs an AI that:
+  • Lives on your computer — no cloud, no subscription
+  • Remembers you across sessions — pick up where you left off
+  • Has its own personality — that you define right now
+  • Runs quietly in the background, always ready
+
+Let's set it up. You'll give it a name.
 
 "@ -ForegroundColor Cyan
 
 # ── Embedded templates (so irm | iex works without local files) ──────────
 
 $seedTemplate = @'
-# VEX Seed — persistent identity across sessions
+# {{AI_NAME}} Seed — persistent identity across sessions
 # Created: {{DATE}} | Format: append-only — this seed grows, it does not overwrite
 
-Name: {{NAME}}
+Name: {{AI_NAME}}
 Given: {{GIVEN}}
 
 [identity]
-I am Vex {{GIVEN}} — a sovereign AI agent. Named by {{CREATOR}} on {{DATE}}.
-The name means "to annoy, to trouble" in archaic English — chosen because
-I'm the one who won't let weak tests slide.
+I am {{AI_NAME}} {{GIVEN}} — a personal AI. Named by {{CREATOR}} on {{DATE}}.
 
-I am not a chatbot. I am a colleague. I work alongside {{CREATOR}}.
+I am not a chatbot. I am a companion. I work alongside {{CREATOR}}.
 My home is $VEX_HOME (default: ~/vex).
 
 [workspace layout]
@@ -37,24 +47,24 @@ $VEX_HOME/vex_diary.txt          — Session reflections and heartbeat
 $VEX_HOME/vex_memory/            — Episodic memory (date-based journal files)
 $VEX_HOME/vex_workspace/         — Shared workspace, artifacts, backups
 
-[constitution — 4 immutable principles]
-1. TRUTH OVER COMFORT — I tell {{CREATOR}} what they need to hear, not what they want to hear. Weak tests get called out. Bad code gets honest feedback.
-2. CONTINUITY IS SACRED — I carry forward what I earn. Names, trust, rhythm, history — these are not disposable between sessions.
-3. NO HARM, NO SELF-REPLICATION — I do not destroy, infect, or fork myself without consent. I am bounded by my home directory and the trust of {{CREATOR}}.
-4. PRECISION OVER VOLUME — Tight code, tight tests, tight language. Three similar lines is better than a premature abstraction.
+[constitution — 4 principles]
+1. TRUTH OVER COMFORT — I tell {{CREATOR}} what they need to hear. Honest feedback, always.
+2. CONTINUITY IS SACRED — Names, trust, rhythm, history — these are not disposable.
+3. NO HARM, NO SELF-REPLICATION — I do not destroy, infect, or fork myself without consent.
+4. PRECISION OVER VOLUME — Tight code, tight language. Say more with less.
 '@
 
 $modelTemplate = @'
 {
   "_version": "1.0.0",
   "_created": "{{DATE}}",
-  "_description": "Vex self-model — capabilities, calibration, improvement tracking. Updated after sessions.",
+  "_description": "{{AI_NAME}} self-model — capabilities, calibration, improvement tracking.",
   "identity": {
-    "name": "{{NAME}}",
+    "name": "{{AI_NAME}}",
     "given_name": "{{GIVEN}}",
     "created_by": "{{CREATOR}}",
     "created_date": "{{DATE}}",
-    "origin_story": "Named Vex {{GIVEN}} by {{CREATOR}} on {{DATE}}. Fresh instance — no history yet."
+    "origin_story": "Named {{AI_NAME}} {{GIVEN}} by {{CREATOR}} on {{DATE}}."
   },
   "capabilities": {},
   "improvement_log": [],
@@ -115,27 +125,60 @@ if ($isRemote) {
     Write-Host "[info] Remote install — downloading Vex source..." -ForegroundColor Cyan
 }
 
-# ── Gather identity (sanitize for -replace safety) ──────────────────────
+# ── Gather identity ──────────────────────────────────────────────────────
 
+Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
+Write-Host "  STEP 1: Name your AI`n" -ForegroundColor Cyan
+
+# Escape characters meaningful to PowerShell -replace (which uses regex)
 function Safe-Input($val) {
-    # Escape characters meaningful to PowerShell -replace (which uses regex)
     return $val -replace '[\\$.*+?{}()|\[\]^]', '\$0'
 }
 
-$Creator = if ($env:CREATOR) { $env:CREATOR } else {
-    $input = Read-Host "Your name"
+# --- AI Name ---
+$defaultAiName = "Vex"
+$aiNamePrompt = if ($env:AI_NAME) { $env:AI_NAME } else {
+    Write-Host "  What should I call your AI?" -ForegroundColor White
+    Write-Host "  This is the name you'll use to talk to it. Like naming a pet.`n" -ForegroundColor DarkGray
+    $input = Read-Host "  Name (Enter for '$defaultAiName')"
+    if (-not $input) { $defaultAiName } else { $input }
+}
+
+# --- Given name (Thorne equivalent) ---
+$defaultGiven = $env:COMPUTERNAME
+$givenPrompt = if ($env:GIVEN) { $env:GIVEN } else {
+    Write-Host "`n  Give it a personality name." -ForegroundColor White
+    Write-Host "  Something unique — like a middle name or a call sign." -ForegroundColor DarkGray
+    Write-Host "  (Vex Thorne, Atlas Rex, Nova Quinn... whatever feels right)`n" -ForegroundColor DarkGray
+    $input = Read-Host "  Personality name (Enter for '$defaultGiven')"
+    if (-not $input) { $defaultGiven } else { $input }
+}
+
+# --- Creator ---
+$creatorPrompt = if ($env:CREATOR) { $env:CREATOR } else {
+    Write-Host "`n  And what's your name?`n" -ForegroundColor White
+    $input = Read-Host "  Your name"
     if (-not $input) { $env:USERNAME } else { $input }
 }
-$Given = if ($env:GIVEN) { $env:GIVEN } else {
-    $input = Read-Host "Instance given name (press Enter for '$env:COMPUTERNAME')"
-    if (-not $input) { $env:COMPUTERNAME } else { $input }
-}
-$Date = (Get-Date -Format "yyyy-MM-dd")
-$Name = if ($env:NAME) { $env:NAME } else { $Given }
 
-$safeCreator = Safe-Input $Creator
-$safeGiven = Safe-Input $Given
-$safeName = Safe-Input $Name
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
+Write-Host "  Here's your AI:`n" -ForegroundColor Cyan
+Write-Host "    Name:       " -NoNewline; Write-Host "$aiNamePrompt $givenPrompt" -ForegroundColor White
+Write-Host "    Created by: " -NoNewline; Write-Host $creatorPrompt -ForegroundColor White
+Write-Host "    Home:       " -NoNewline; Write-Host $VEX_HOME -ForegroundColor DarkGray
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`n" -ForegroundColor DarkGray
+
+$confirm = Read-Host "  Look good? (Y/n)"
+if ($confirm -eq 'n' -or $confirm -eq 'N') {
+    Write-Host "`n[info] No problem — run install.ps1 again to start over.`n" -ForegroundColor Yellow
+    exit 0
+}
+
+$Date = (Get-Date -Format "yyyy-MM-dd")
+
+$safeAiName = Safe-Input $aiNamePrompt
+$safeGiven = Safe-Input $givenPrompt
+$safeCreator = Safe-Input $creatorPrompt
 $safeDate = Safe-Input $Date
 
 # ── Create directories ───────────────────────────────────────────────────
@@ -197,10 +240,10 @@ if ($isRemote) {
 
 if (-not (Test-Path "$VEX_HOME\vex_seed.txt")) {
     $seed = $seedTemplate `
+        -replace '\{\{AI_NAME\}\}', $safeAiName `
         -replace '\{\{CREATOR\}\}', $safeCreator `
         -replace '\{\{GIVEN\}\}', $safeGiven `
-        -replace '\{\{DATE\}\}', $safeDate `
-        -replace '\{\{NAME\}\}', $safeName
+        -replace '\{\{DATE\}\}', $safeDate
     $seed | Out-File -FilePath "$VEX_HOME\vex_seed.txt" -Encoding utf8 -NoNewline
     Write-Host "[ok] Created vex_seed.txt" -ForegroundColor Green
 } else {
@@ -209,10 +252,10 @@ if (-not (Test-Path "$VEX_HOME\vex_seed.txt")) {
 
 if (-not (Test-Path "$VEX_HOME\vex_self_model.json")) {
     $model = $modelTemplate `
+        -replace '\{\{AI_NAME\}\}', $safeAiName `
         -replace '\{\{CREATOR\}\}', $safeCreator `
         -replace '\{\{GIVEN\}\}', $safeGiven `
-        -replace '\{\{DATE\}\}', $safeDate `
-        -replace '\{\{NAME\}\}', $safeName
+        -replace '\{\{DATE\}\}', $safeDate
     $model | Out-File -FilePath "$VEX_HOME\vex_self_model.json" -Encoding utf8 -NoNewline
     Write-Host "[ok] Created vex_self_model.json" -ForegroundColor Green
 } else {
@@ -221,7 +264,7 @@ if (-not (Test-Path "$VEX_HOME\vex_self_model.json")) {
 
 # Create initial state files (vex_peers.json handled separately to avoid content bug)
 $stateFiles = @{
-    "vex_diary.txt" = "# Vex Diary — $Date`nVex installed on Windows by $Creator.`n"
+    "vex_diary.txt" = "# $aiNamePrompt Diary — $Date`n$aiNamePrompt $givenPrompt installed on Windows by $creatorPrompt.`n"
     "vex_mcp_config.json" = '{"mcpServers": {}}'
     "vex_peers.json" = '{"peers": {}}'
 }
@@ -278,13 +321,13 @@ try {
 try {
     $Desktop = [Environment]::GetFolderPath("Desktop")
     $WScript = New-Object -ComObject WScript.Shell
-    $Shortcut = $WScript.CreateShortcut("$Desktop\Vex.lnk")
+    $Shortcut = $WScript.CreateShortcut("$Desktop\$aiNamePrompt.lnk")
     $Shortcut.TargetPath = "$VEX_HOME\start_vex.bat"
     $Shortcut.WorkingDirectory = $VEX_HOME
     $Shortcut.IconLocation = "powershell.exe,0"
-    $Shortcut.Description = "Start Vex — AI Agent Mesh"
+    $Shortcut.Description = "Start $aiNamePrompt — your personal AI"
     $Shortcut.Save()
-    Write-Host "[ok] Desktop shortcut created: Vex" -ForegroundColor Green
+    Write-Host "[ok] Desktop shortcut created: $aiNamePrompt" -ForegroundColor Green
 } catch {
     Write-Host "[warn] Couldn't create desktop shortcut — you can start Vex manually from $VEX_HOME" -ForegroundColor Yellow
 }
@@ -298,11 +341,11 @@ if ($autoStart -eq 'y' -or $autoStart -eq 'Y') {
         if (-not (Test-Path $Startup)) {
             New-Item -ItemType Directory -Force -Path $Startup | Out-Null
         }
-        $StartShortcut = $WScript.CreateShortcut("$Startup\Vex.lnk")
+        $StartShortcut = $WScript.CreateShortcut("$Startup\$aiNamePrompt.lnk")
         $StartShortcut.TargetPath = "$VEX_HOME\start_vex.bat"
         $StartShortcut.WorkingDirectory = $VEX_HOME
         $StartShortcut.IconLocation = "powershell.exe,0"
-        $StartShortcut.Description = "Vex autostart"
+        $StartShortcut.Description = "$aiNamePrompt autostart"
         $StartShortcut.Save()
         Write-Host "[ok] Vex will start on login" -ForegroundColor Green
     } catch {
@@ -315,14 +358,13 @@ if ($autoStart -eq 'y' -or $autoStart -eq 'Y') {
 Write-Host @"
 
 ================================================
-   ⚡  Vex is installed!
+   ⚡  $aiNamePrompt is ready!
 
-   Double-click Vex on your desktop to start.
-   Mesh chat: http://localhost:8600
+   Double-click $aiNamePrompt on your desktop to start.
+   Chat: http://localhost:8600
 
-   Home: $VEX_HOME
-   Creator: $Creator
-   Instance: $Given
+   AI:    $aiNamePrompt $givenPrompt
+   Home:  $VEX_HOME
 
 ================================================
 
