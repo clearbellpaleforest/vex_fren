@@ -7,15 +7,7 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.138%2B-009688)](https://fastapi.tiangolo.com/)
 
-```
-   ██▒   █▓█████ ▒██   ██▒
-   ▓██░   ██▀ ██ ░▒██  ██░
-   ▓██  ▒ ██  ██  ░▒██ ██░
-   ▒██  ░ ██  ██   ░▒████░
-   ▒██▒  ░██  ██   ░░▒█░░
-   ░▒██  ░██  ██    ░░█░
-   ░░▒▒▒ ░▒▒  ▒▒    ░░▒
-```
+<br>
 
 **Your AI. Your machine. Your rules.** Vex is a personal AI that lives on your computer — no cloud accounts, no subscriptions, no one else's server. It remembers who you are, picks up where you left off, and stays running in the background, ready whenever you need it. Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sovereign AI framework.
 
@@ -194,14 +186,6 @@ Your identity files (seed, self-model, memory, diary) belong to **you** — they
 
 <div align="center">
 
-```
-  ⚡  Vex Thorne  ⚡
-  Truth over comfort. Continuity is sacred.
-  Built on Vex: github.com/clearbellpaleforest/vex
-
-  ┌─────────────────────────────────────────────┐
-  │  🤖  Your AI.  Your machine.  Your rules.  │
-  └─────────────────────────────────────────────┘
-```
+⚡ Built on [Vex](https://github.com/clearbellpaleforest/vex) · Truth over comfort. Continuity is sacred.
 
 </div>
