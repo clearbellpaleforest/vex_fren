@@ -24,7 +24,7 @@ federate with other Vex instances across machines for shared awareness and messa
 Open **PowerShell** (right-click Start, select "Windows PowerShell" or "Terminal") and paste:
 
 ```powershell
-irm https://raw.githubusercontent.com/clearbellpaleforest/vex/vex_fren/install.ps1 | iex
+irm https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.ps1 | iex
 ```
 
 When it finishes, double-click **Vex** on your desktop to start.
