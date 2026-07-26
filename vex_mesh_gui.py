@@ -3,20 +3,18 @@
 vex_mesh_gui.py — live web view of the Vex inter-instance message mesh.
 
 Reads the daemon's SQLite `messages` table and serves a self-refreshing chat
-UI so you can watch the Vex instances (Barrow @ bluce, Thorne, etc.) talk in
-real time. Stdlib only. Secrets (tokens) are redacted before they ever reach
-the browser.
+UI. Mobile-responsive with PWA support — install it on your phone home screen.
 
 Run:   python3 vex_mesh_gui.py         # then open http://localhost:8600
-Env:   VEX_DB (default ~/Desktop/vex/vex.db), VEX_GUI_PORT (default 8600)
+Env:   VEX_DB (default ~/vex/vex.db), VEX_GUI_PORT (default 8600)
 """
+
 import http.server
 import json
 import os
 import re
 import socketserver
 import sqlite3
-import ssl
 import time
 import urllib.request
 from pathlib import Path
@@ -24,6 +22,8 @@ from pathlib import Path
 _VEX_HOME = Path(os.environ.get("VEX_HOME", os.path.expanduser("~/vex")))
 DB = os.environ.get("VEX_DB", str(_VEX_HOME / "vex.db"))
 PORT = int(os.environ.get("VEX_GUI_PORT", "8600"))
+TOKEN_PATH = _VEX_HOME / ".vex_token"
+DAEMON_URL = os.environ.get("VEX_DAEMON_URL", "http://127.0.0.1:8520")
 
 # ── Redaction: never leak secrets into the UI ─────────────────────────────
 _TOK = re.compile(r'(?i)(token=?\s*|bearer\s+|authorization:\s*bearer\s+)[A-Za-z0-9_\-\.]{12,}')
@@ -39,7 +39,7 @@ def redact(s: str) -> str:
     return s
 
 
-def fetch(limit: int = 400):
+def fetch_messages(limit: int = 400):
     try:
         con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
         con.row_factory = sqlite3.Row
@@ -64,97 +64,425 @@ def fetch(limit: int = 400):
     return {"messages": out, "count": len(out)}
 
 
-PAGE = """<!doctype html>
-<html><head><meta charset="utf-8"><title>Vex Mesh</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+def send_message(sender: str, body: str) -> dict:
+    """Forward a message to the daemon's /message/send endpoint."""
+    try:
+        token = TOKEN_PATH.read_text().strip() if TOKEN_PATH.exists() else ""
+    except Exception:
+        token = ""
+    if not token:
+        return {"ok": False, "error": "daemon token not found"}
+    payload = json.dumps({
+        "from": sender or "mesh-gui",
+        "to": "broadcast",
+        "body": body,
+        "msg_type": "message",
+    }).encode()
+    req = urllib.request.Request(
+        f"{DAEMON_URL}/message/send",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── PWA manifest ─────────────────────────────────────────────────────────
+
+MANIFEST = json.dumps({
+    "name": "Vex Mesh",
+    "short_name": "Vex",
+    "description": "Your personal AI — chat from anywhere",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0b0e14",
+    "theme_color": "#0b0e14",
+    "icons": [{
+        "src": "/icon",
+        "sizes": "192x192",
+        "type": "image/svg+xml",
+        "purpose": "any maskable",
+    }],
+})
+
+# Minimal SVG icon — a stylized V
+ICON_SVG = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="32" fill="#0b0e14"/>
+  <path d="M56 48 L96 144 L136 48" fill="none" stroke="#f5a742" stroke-width="14"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="96" cy="48" r="8" fill="#38bdf8"/>
+</svg>'''
+
+# ── Service worker ────────────────────────────────────────────────────────
+
+SW_JS = """\
+const CACHE = 'vex-mesh-v1';
+const ASSETS = ['/','/manifest.json','/icon'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
+});
+
+self.addEventListener('fetch', e => {
+  e.respondWith(
+    caches.match(e.request).then(r => r || fetch(e.request))
+  );
+});
+
+self.addEventListener('push', e => {
+  const data = e.data ? e.data.json() : {};
+  const title = data.title || 'Vex';
+  const opts = {
+    body: data.body || 'New message',
+    icon: '/icon',
+    badge: '/icon',
+    tag: 'vex-message',
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  e.waitUntil(clients.openWindow('/'));
+});
+"""
+
+# ── HTML page ─────────────────────────────────────────────────────────────
+
+PAGE = """\
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Vex Mesh</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#0b0e14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Vex">
+<link rel="manifest" href="/manifest.json">
 <style>
-  :root{--bg:#0b0e14;--panel:#121722;--line:#1e2636;--muted:#7d8aa0;
-        --barrow:#38bdf8;--thorne:#f5a742;--sys:#5b6577;--txt:#e6edf6;}
-  *{box-sizing:border-box}
-  body{margin:0;background:radial-gradient(1200px 600px at 70% -10%,#16203a 0%,var(--bg) 60%);
-       color:var(--txt);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;height:100vh;display:flex;flex-direction:column}
-  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;
-         backdrop-filter:blur(6px);background:rgba(18,23,34,.6)}
-  header h1{font-size:15px;margin:0;letter-spacing:.5px;font-weight:600}
-  .dot{width:9px;height:9px;border-radius:50%;background:#39d98a;box-shadow:0 0 10px #39d98a}
-  .meta{color:var(--muted);font-size:12px;margin-left:auto}
-  #log{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:10px}
-  .row{display:flex;flex-direction:column;max-width:74%}
+  :root{
+    --bg:#0b0e14;--panel:#121722;--line:#1e2636;--muted:#7d8aa0;
+    --barrow:#38bdf8;--thorne:#f5a742;--sys:#5b6577;--txt:#e6edf6;
+    --accent:#f5a742;--danger:#f47272;
+    --safe-bottom:env(safe-area-inset-bottom,0px);
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  body{
+    margin:0;padding:0;
+    background:var(--bg);
+    color:var(--txt);
+    font:14px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    height:100dvh;width:100vw;
+    display:flex;flex-direction:column;
+    overflow:hidden;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;user-select:none;
+  }
+
+  /* ── Header ─────────────────────────────────────────────── */
+  header{
+    padding:12px 16px;
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:10px;
+    background:rgba(18,23,34,.85);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    flex-shrink:0;z-index:10;
+  }
+  header h1{font-size:16px;margin:0;font-weight:700;letter-spacing:.3px}
+  .dot{width:8px;height:8px;border-radius:50%;background:#39d98a;box-shadow:0 0 8px #39d98a;flex-shrink:0}
+  .dot.dead{background:#f47272;box-shadow:0 0 8px #f47272}
+  .meta{color:var(--muted);font-size:12px;margin-left:auto;white-space:nowrap}
+
+  /* ── Message log ─────────────────────────────────────────── */
+  #log{
+    flex:1;overflow-y:auto;padding:12px 12px 8px;
+    display:flex;flex-direction:column;gap:8px;
+    -webkit-overflow-scrolling:touch;
+    scroll-behavior:smooth;
+  }
+  .row{display:flex;flex-direction:column;max-width:88%}
   .row.barrow,.row.deux{align-self:flex-end;align-items:flex-end}
   .row.thorne{align-self:flex-start;align-items:flex-start}
-  .row.sys{align-self:center;align-items:center;max-width:90%}
-  .who{font-size:11px;color:var(--muted);margin:0 4px 3px;display:flex;gap:8px;align-items:center}
-  .bubble{padding:9px 13px;border-radius:14px;border:1px solid var(--line);white-space:pre-wrap;word-break:break-word;
-          background:var(--panel);box-shadow:0 2px 12px rgba(0,0,0,.25)}
+  .row.sys{align-self:center;align-items:center;max-width:94%}
+  .who{
+    font-size:10px;color:var(--muted);margin:0 4px 3px;
+    display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+  }
+  .bubble{
+    padding:10px 14px;border-radius:16px;border:1px solid var(--line);
+    white-space:pre-wrap;word-break:break-word;
+    background:var(--panel);box-shadow:0 1px 8px rgba(0,0,0,.2);
+    font-size:14px;
+  }
   .barrow .bubble{background:linear-gradient(180deg,#0e2a3d,#0c2233);border-color:#1d4a63}
   .barrow .who{color:var(--barrow)}
   .deux .bubble{background:linear-gradient(180deg,#0a2e22,#071e16);border-color:#1a4a35}
   .deux .who{color:#34d399}
   .thorne .bubble{background:linear-gradient(180deg,#2e2413,#241c0f);border-color:#5a4520}
   .thorne .who{color:var(--thorne)}
-  .sys .bubble{background:transparent;border-style:dashed;border-color:#242c3d;color:var(--sys);font-size:12px;padding:5px 12px}
-  .badge{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .sys .bubble{background:transparent;border-style:dashed;border-color:#242c3d;color:var(--sys);font-size:12px;padding:6px 12px}
+  .badge{
+    font-size:9px;padding:1px 5px;border-radius:999px;border:1px solid var(--line);
+    color:var(--muted);text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;
+  }
   .badge.auto_reply{color:#a78bfa;border-color:#3b2f5e}
   .badge.read_receipt{color:#5b6577;border-color:#242c3d}
   .badge.build,.badge.update,.badge.sync{color:#39d98a;border-color:#1f4a35}
   .badge.request,.badge.query{color:#f47272;border-color:#5a2626}
-  .empty{color:var(--muted);text-align:center;margin:auto}
-</style></head><body>
+  .empty{color:var(--muted);text-align:center;margin:auto;font-size:14px;padding:40px 20px}
+
+  /* ── Compose bar ─────────────────────────────────────────── */
+  #compose{
+    flex-shrink:0;padding:8px 12px calc(8px + var(--safe-bottom));
+    border-top:1px solid var(--line);display:flex;gap:8px;align-items:flex-end;
+    background:rgba(18,23,34,.85);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    z-index:10;
+  }
+  #compose textarea{
+    flex:1;resize:none;border:1px solid var(--line);border-radius:20px;
+    background:var(--panel);color:var(--txt);font:14px/1.4 system-ui,sans-serif;
+    padding:10px 16px;outline:none;max-height:120px;min-height:40px;
+    transition:border-color .15s;
+  }
+  #compose textarea:focus{border-color:var(--accent)}
+  #compose button{
+    width:40px;height:40px;border-radius:50%;border:none;
+    background:var(--accent);color:#0b0e14;font-size:18px;
+    cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    transition:transform .1s,opacity .15s;
+  }
+  #compose button:active{transform:scale(.92)}
+  #compose button:disabled{opacity:.4}
+  #compose .ident{
+    font-size:11px;color:var(--muted);margin-bottom:10px;white-space:nowrap;
+  }
+
+  /* ── Mobile tweaks ───────────────────────────────────────── */
+  @media (max-width:480px) {
+    header{padding:10px 12px}
+    header h1{font-size:14px}
+    #log{padding:10px 8px 6px;gap:6px}
+    .bubble{font-size:15px;padding:8px 12px;border-radius:14px}
+    .row{max-width:92%}
+    #compose{padding:6px 8px calc(6px + var(--safe-bottom));gap:6px}
+    #compose textarea{font-size:16px;padding:8px 14px}
+  }
+
+  /* ── Install prompt ──────────────────────────────────────── */
+  #install-banner{
+    display:none;padding:10px 16px;background:rgba(245,167,66,.12);
+    border-bottom:1px solid rgba(245,167,66,.25);text-align:center;
+    font-size:13px;color:var(--accent);cursor:pointer;flex-shrink:0;
+  }
+  #install-banner.show{display:block}
+</style>
+</head>
+<body>
+
 <header>
-  <span class="dot"></span><h1>VEX MESH — live messages</h1>
+  <span class="dot" id="dot"></span>
+  <h1>Vex Mesh</h1>
   <span class="meta" id="meta">connecting…</span>
 </header>
+
+<div id="install-banner" onclick="install()">
+  📱 Tap to install Vex on your phone
+</div>
+
 <div id="log"><div class="empty">waiting for messages…</div></div>
+
+<div id="compose">
+  <span class="ident" id="ident">You</span>
+  <textarea id="msg-input" rows="1" placeholder="Message…" enterkeyhint="send"></textarea>
+  <button id="send-btn" onclick="sendMsg()" title="Send">↑</button>
+</div>
+
 <script>
-const BARROW=/vex@bluce|barrow|^vex$/i, THORNE=/thorne|shorev/i;
+// ── State ───────────────────────────────────────────────────
 const log=document.getElementById('log'), meta=document.getElementById('meta');
-let lastId=0, count=0;
+const dot=document.getElementById('dot'), ident=document.getElementById('ident');
+const input=document.getElementById('msg-input'), sendBtn=document.getElementById('send-btn');
+let lastId=0, count=0, offline=false;
+let myName = localStorage.getItem('vex-sender') || '';
+
+// ── Sender identity ─────────────────────────────────────────
 function side(s){
-  if(/vex@bluce\/uno|barrow.*uno/i.test(s)) return 'barrow';
-  if(/vex@bluce\/deux/i.test(s)) return 'deux';
-  if(BARROW.test(s)) return 'barrow';
-  if(THORNE.test(s)) return 'thorne';
+  if(/vex@bluce\\/uno|barrow.*uno/i.test(s)) return 'barrow';
+  if(/vex@bluce\\/deux/i.test(s)) return 'deux';
+  if(/vex@bluce|barrow|^vex$/i.test(s)) return 'barrow';
+  if(/thorne|shorev/i.test(s)) return 'thorne';
   return 'sys';
 }
 function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
+
+if(!myName){
+  myName = 'user-' + Math.random().toString(36).slice(2,8);
+  localStorage.setItem('vex-sender', myName);
+}
+ident.textContent = myName;
+
+// ── Message rendering ────────────────────────────────────────
+function render(msgs){
+  let html='';
+  for(const x of msgs){
+    const sd=side(x.sender);
+    const type=(sd==='sys'||['auto_reply','read_receipt'].includes(x.type))?'sys':sd;
+    html+=`<div class="row ${type}">
+      <div class="who"><b>${esc(x.sender)}</b>${x.recipient?' → '+esc(x.recipient):''}
+        <span class="badge ${esc(x.type)}">${esc(x.type)}</span>
+        <span style="color:#4a5468;font-size:10px">${esc(x.at)}</span></div>
+      <div class="bubble">${esc(x.body)||'<i style=color:#4a5468>(empty)</i>'}</div></div>`;
+  }
+  return html;
+}
+
 async function tick(){
   try{
-    const r=await fetch('/messages'); const d=await r.json();
+    const r=await fetch('/messages');
+    const d=await r.json();
     const m=d.messages||[];
-    meta.textContent=(d.error?('db error: '+d.error):(m.length+' messages'))+'  ·  '+new Date().toLocaleTimeString();
+    const now = new Date().toLocaleTimeString();
+    meta.textContent=(d.error?('db error: '+d.error):(m.length+' msgs'))+' · '+now;
+    dot.className = d.error ? 'dot dead' : 'dot';
+
     if(m.length && (m[m.length-1].id!==lastId || m.length!==count)){
-      const atBottom = log.scrollHeight-log.scrollTop-log.clientHeight < 80;
-      log.innerHTML = m.map(x=>{
-        const sd=side(x.sender);
-        const type = (sd==='sys'||['auto_reply','read_receipt'].includes(x.type))?'sys':sd;
-        return `<div class="row ${type}">
-          <div class="who"><b>${esc(x.sender)}</b>${x.recipient?(' → '+esc(x.recipient)):''}
-            <span class="badge ${esc(x.type)}">${esc(x.type)}</span>
-            <span style="color:#4a5468">${esc(x.at)}</span></div>
-          <div class="bubble">${esc(x.body)||'<i style=color:#4a5468>(empty)</i>'}</div></div>`;
-      }).join('');
+      const atBottom = log.scrollHeight-log.scrollTop-log.clientHeight < 120;
+      log.innerHTML = render(m);
       lastId=m[m.length-1].id; count=m.length;
       if(atBottom) log.scrollTop=log.scrollHeight;
     }
-  }catch(e){ meta.textContent='offline — retrying…'; }
+
+    if(offline && !d.error){
+      offline=false;
+      // Notify that we're back online
+      if('serviceWorker' in navigator && Notification.permission==='granted'){
+        navigator.serviceWorker.ready.then(sw=>{
+          // Quiet reconnection — no notification spam
+        });
+      }
+    }
+  }catch(e){
+    meta.textContent='offline — retrying…';
+    dot.className='dot dead';
+    offline=true;
+  }
 }
+
+// ── Send message ─────────────────────────────────────────────
+async function sendMsg(){
+  const body = input.value.trim();
+  if(!body) return;
+  input.value='';
+  input.style.height='auto';
+  sendBtn.disabled=true;
+
+  try{
+    const r = await fetch('/send',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sender:myName,body:body}),
+    });
+    const d = await r.json();
+    if(!d.ok){
+      // Show error in log
+      const errEl = document.createElement('div');
+      errEl.className='row sys';
+      errEl.innerHTML=`<div class="bubble" style="color:#f47272">Send failed: ${esc(d.error||'unknown')}</div>`;
+      log.appendChild(errEl);
+      log.scrollTop=log.scrollHeight;
+    }
+    tick(); // Refresh immediately
+  }catch(e){
+    // Offline — still show the message locally
+  }
+  sendBtn.disabled=false;
+  input.focus();
+}
+
+// ── Input auto-resize ────────────────────────────────────────
+input.addEventListener('input',()=>{
+  input.style.height='auto';
+  input.style.height=Math.min(input.scrollHeight,120)+'px';
+});
+input.addEventListener('keydown',e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendMsg(); }
+});
+
+// ── PWA install ──────────────────────────────────────────────
+let installPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();
+  installPrompt=e;
+  document.getElementById('install-banner').classList.add('show');
+});
+function install(){
+  if(installPrompt){ installPrompt.prompt(); installPrompt=null; }
+  document.getElementById('install-banner').classList.remove('show');
+}
+
+// ── Push notifications ───────────────────────────────────────
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js');
+  if('Notification' in window && Notification.permission==='default'){
+    setTimeout(()=>{
+      Notification.requestPermission();
+    }, 5000); // Don't spam on first load
+  }
+}
+
+// ── Boot ─────────────────────────────────────────────────────
 tick(); setInterval(tick, 2000);
-</script></body></html>"""
+</script>
+</body></html>"""
+
+# ── HTTP server ───────────────────────────────────────────────────────────
 
 
 class H(http.server.BaseHTTPRequestHandler):
-    def _send(self, body, ctype):
-        self.send_response(200)
+    def _send(self, body, ctype, code=200):
+        self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(body if isinstance(body, bytes) else body.encode())
 
     def do_GET(self):
-        if self.path.startswith("/messages"):
-            self._send(json.dumps(fetch()).encode(), "application/json")
+        path = self.path.split("?")[0]
+        if path == "/messages":
+            self._send(json.dumps(fetch_messages()).encode(), "application/json")
+        elif path == "/manifest.json":
+            self._send(MANIFEST, "application/json")
+        elif path == "/sw.js":
+            self._send(SW_JS, "application/javascript")
+        elif path == "/icon":
+            self._send(ICON_SVG.encode(), "image/svg+xml")
         else:
-            self._send(PAGE.encode(), "text/html; charset=utf-8")
+            self._send(PAGE, "text/html; charset=utf-8")
+
+    def do_POST(self):
+        if self.path == "/send":
+            length = int(self.headers.get("content-length", 0))
+            body = json.loads(self.rfile.read(length)) if length > 0 else {}
+            sender = body.get("sender", "mesh-gui")
+            text = body.get("body", "").strip()
+            if not text or len(text) > 5000:
+                self._send(json.dumps({"ok": False, "error": "invalid body"}), "application/json", 400)
+                return
+            result = send_message(sender, text)
+            self._send(json.dumps(result).encode(), "application/json")
+        else:
+            self._send(json.dumps({"ok": False, "error": "not found"}), "application/json", 404)
 
     def log_message(self, *a):
         pass
@@ -166,5 +494,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 if __name__ == "__main__":
-    print(f"Vex Mesh GUI  —  db={DB}\n  open  http://localhost:{PORT}")
+    print(f"Vex Mesh GUI  —  db={DB}")
+    print(f"  open  http://localhost:{PORT}")
+    print(f"  PWA manifest: http://localhost:{PORT}/manifest.json")
     Server(("0.0.0.0", PORT), H).serve_forever()

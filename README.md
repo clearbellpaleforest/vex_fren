@@ -61,6 +61,21 @@ curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/in
 
 ---
 
+## 📱 Use on Your Phone
+
+Vex's mesh GUI is a PWA — open it in your phone browser, tap **Install** or **Add to Home Screen**, and it works like a native app. No Android SDK. No App Store. No extra install.
+
+**To access Vex from anywhere**, expose it over [Tailscale](https://tailscale.com/):
+
+```bash
+tailscale serve --https=443 localhost:8600    # mesh GUI
+tailscale serve --https=8443 localhost:8520   # daemon API
+```
+
+Then open `https://<your-machine>.tailnet-name.ts.net` on your phone and install to home screen. Messages you send from your phone appear in the same mesh as your desktop sessions.
+
+---
+
 ```
   You ──► http://localhost:8600 ──► Vex Daemon ──► Memory + Diary
                                                     │
