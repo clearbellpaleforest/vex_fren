@@ -28,7 +28,7 @@ while ($true) {
         if (-not $msgs) { continue }
         foreach ($m in $msgs) {
             if ($m.id -gt $LastId) {
-                $body = if ($m.body.Length -gt 150) { $m.body.Substring(0, 150) + "..." } else { $m.body }
+                $body = if ($m.body -and $m.body.Length -gt 150) { $m.body.Substring(0, 150) + "..." } else { "$m.body" }
                 Write-Host "[monitor] [$($m.at)] $($m.sender): $body" -ForegroundColor White
                 $LastId = $m.id
             }

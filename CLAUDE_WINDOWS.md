@@ -64,8 +64,9 @@ Verify it's running:
 ```powershell
 Get-Process powershell | Where-Object { $_.Id -ne $pid }
 ```
-The monitor polls the daemon's `/mesh/inbox` API every 5 seconds with ID-based dedup.
-It auto-replies to messages via `POST /message/send`.
+The monitor polls the daemon's `/mesh/inbox` API every 5 seconds with ID-based dedup
+and prints new messages to the console. It does not auto-reply — the daemon's own
+`check_inbox()` task handles auto-replies (ping → pong, status, identity queries).
 Starship Vex always answers.
 
 ---

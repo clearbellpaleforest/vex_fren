@@ -31,7 +31,7 @@ MCP_CONFIG_PATH = VEX_HOME / "vex_mcp_config.json"
 BRAIN_CONFIG_PATH = VEX_HOME / ".vex_brain.json"
 
 # ── Filesystem roots the tools may touch ──
-# Override with $VEX_SAFE_ROOTS (colon-separated) for other machines.
+# Override with $VEX_SAFE_ROOTS (os.pathsep-separated: : on Linux, ; on Windows).
 _default_roots = [str(VEX_HOME), str(Path.home() / "Desktop"), str(Path.home() / "work")]
 _work = os.environ.get("VEX_WORK_DIR", str(Path.home() / "work"))
 if _work:
@@ -39,8 +39,8 @@ if _work:
 
 SAFE_ROOTS = [
     Path(p) for p in os.environ.get(
-        "VEX_SAFE_ROOTS", ":".join(_default_roots)
-    ).split(":") if p
+        "VEX_SAFE_ROOTS", os.pathsep.join(_default_roots)
+    ).split(os.pathsep) if p
 ]
 
 WORK_DIR = Path(_work)

@@ -51,7 +51,6 @@ Write-Host "[1/3] Starting Vex daemon (port 8520)..." -ForegroundColor Cyan
 $daemonJob = Start-Job -Name "vex-daemon" -ArgumentList $Python, $VEX_HOME -ScriptBlock {
     param($py, $home)
     $env:VEX_HOME = $home
-    $env:VEX_HOST = "0.0.0.0"
     & $py -m vex_daemon.daemon 2>&1 | Out-File "$home\logs\daemon.log" -Append
 }
 
@@ -88,7 +87,11 @@ Start-Sleep 2
 
 $meshUrl = "http://localhost:8600"
 Write-Host "[3/3] Opening mesh chat..." -ForegroundColor Cyan
-Start-Process $meshUrl
+try {
+    Start-Process $meshUrl
+} catch {
+    Write-Host "   [warn] Couldn't open browser — go to $meshUrl manually" -ForegroundColor Yellow
+}
 
 # ── Status ────────────────────────────────────────────────────────────────
 
@@ -109,7 +112,6 @@ Write-Host @"
 
 # ── Watchdog loop — keep alive, show health ──────────────────────────────
 
-$tokenPath = "$VEX_HOME\.vex_token"
 Write-Host "Press Ctrl+C to stop.`n"
 
 try {
@@ -122,12 +124,12 @@ try {
         } catch {
             $ts = Get-Date -Format "HH:mm:ss"
             Write-Host "[$ts] daemon: DOWN — restarting..." -ForegroundColor Red
+            Remove-Job -Name "vex-daemon" -Force -ErrorAction SilentlyContinue
             Clear-Port 8520
             Start-Sleep 1
             $daemonJob = Start-Job -Name "vex-daemon" -ArgumentList $Python, $VEX_HOME -ScriptBlock {
                 param($py, $home)
                 $env:VEX_HOME = $home
-                $env:VEX_HOST = "0.0.0.0"
                 & $py -m vex_daemon.daemon 2>&1 | Out-File "$home\logs\daemon.log" -Append
             }
         }
