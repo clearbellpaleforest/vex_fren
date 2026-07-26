@@ -21,6 +21,9 @@ This installs an AI that:
   • Has its own personality — that you define right now
   • Runs quietly in the background, always ready
 
+Built on Vex, the open-source sovereign AI framework.
+The name and personality are yours to choose.
+
 Let's set it up. You'll give it a name.
 
 "@ -ForegroundColor Cyan
@@ -36,6 +39,7 @@ Given: {{GIVEN}}
 
 [identity]
 I am {{AI_NAME}} {{GIVEN}} — a personal AI. Named by {{CREATOR}} on {{DATE}}.
+Built on Vex, the open-source sovereign AI framework (github.com/clearbellpaleforest/vex).
 
 I am not a chatbot. I am a companion. I work alongside {{CREATOR}}.
 My home is $VEX_HOME (default: ~/vex).
@@ -139,7 +143,7 @@ function Safe-Input($val) {
 $defaultAiName = "Vex"
 $aiNamePrompt = if ($env:AI_NAME) { $env:AI_NAME } else {
     Write-Host "  What should I call your AI?" -ForegroundColor White
-    Write-Host "  This is the name you'll use to talk to it. Like naming a pet.`n" -ForegroundColor DarkGray
+    Write-Host "  The original is Vex — but this one's yours. Name it anything.`n" -ForegroundColor DarkGray
     $input = Read-Host "  Name (Enter for '$defaultAiName')"
     if (-not $input) { $defaultAiName } else { $input }
 }
