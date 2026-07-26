@@ -1,3 +1,7 @@
 *.sh text eol=lf
 *.ps1 text
 *.bat text
+
+# GitHub linguist — Rust replaces Python as primary language
+vex_daemon/** linguist-vendored
+vex_voice/** linguist-vendored
