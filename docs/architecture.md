@@ -60,29 +60,3 @@ A FastAPI process (localhost, SQLite) that outlives individual CLI sessions:
 - **Message bus** — coordination between concurrent instances
 
 All mutating endpoints are token-gated. See the README security section.
-
-**The daemon has no model.** Vex is the live CLI sessions; the daemon relays,
-remembers, and coordinates (docs/decisions.md #1). Bus-driven auto-update is
-opt-in only (`VEX_UPDATER_ENABLE=1`, default off — decisions.md #4).
-
-## Watch (VexCom)
-
-The wrist is a mesh citizen, not a private client (full flow: docs/design.md):
-
-```
-Active Max ──BLE/ZML──► Zepp phone app ──HTTPS (tailscale serve)──► daemon :8520
-  pages/index.js          app-side/index.js                            │
-  5 prompts + poll UI     ASK → POST /ask                              ▼
-                          POLL → GET /ask/replies          mesh (messages table)
-                                                           sender: aldous@watch
-                                                           answered by live Vex
-                                                           sessions / mesh GUI
-```
-
-- Keyword prompts (status/ping/inbox/…) answer instantly from the daemon.
-- Everything else lands on the mesh as `aldous@watch` (msg_type `voice`);
-  replies addressed to `aldous@watch` reach the wrist via 3 s polling, 90 s cap.
-- Phone chat is the mesh GUI (:8600) over Tailscale — no separate phone app.
-- v2 (gated on an on-device mic spike): hold-to-talk Opus recording →
-  `POST /voice` → server-side STT → same mesh path.
-

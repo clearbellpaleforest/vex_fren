@@ -19,8 +19,6 @@ DRIFT_THRESHOLD = 0.05
 IDLE_THRESHOLD_MINUTES = 30
 DREAM_THRESHOLD_HOURS = 24
 SNAPSHOT_EVERY_N_TICKS = 12  # hourly
-STAGNATION_TICKS = 72        # 6 hours — warn if coherence unchanged
-COHERENCE_PRECISION = 0.0001  # floating-point tolerance
 
 
 class HeartbeatState:
@@ -124,7 +122,6 @@ async def run_heartbeat(
     import aiosqlite
 
     prev_coherence = None
-    stagnation_ticks = 0
     idle_ticks = 0
     first_idle_tick = False
     poll_count = 0
@@ -153,18 +150,6 @@ async def run_heartbeat(
             # 1. Compute coherence
             coherence = get_coherence_fn()
             state.mps_coherence = coherence
-
-            # 1a. Detect stagnation — coherence unchanged for many ticks
-            if prev_coherence is not None and abs(coherence - prev_coherence) < COHERENCE_PRECISION:
-                stagnation_ticks += 1
-            else:
-                stagnation_ticks = 0
-            if stagnation_ticks >= STAGNATION_TICKS:
-                await write_diary(
-                    f"Coherence stagnant at {coherence:.4f} for {stagnation_ticks} ticks "
-                    f"({stagnation_ticks * tick_interval // 3600}h) — possible calibration stall.",
-                    "warning")
-                stagnation_ticks = 0  # Reset so we don't spam every tick
 
             # 2. Compute drift
             if prev_coherence is not None:
@@ -246,50 +231,52 @@ async def run_heartbeat(
 BUS_WATCH_INTERVAL = 30  # seconds — live inter-instance comms
 
 
-def _bus_tick() -> None:
-    """One bus-watcher pass. Sync by design (urllib, sqlite, subprocess) —
-    always called off-loop via asyncio.to_thread so slow or unreachable peers
-    cannot stall the event loop (5 s timeout × N peers adds up)."""
-    import urllib.request
-
-    # Ingest local bus
-    try:
-        from vexcom import ingest_bus
-        ingest_bus()
-    except Exception:
-        pass
-    # Poll peer /bus endpoints
-    try:
-        from peers import load_peers
-        peers_cfg = load_peers()["peers"]
-        for name, cfg in peers_cfg.items():
-            try:
-                req = urllib.request.Request(
-                    f"{cfg['url']}/bus?n=50",
-                    headers={"Authorization": f"Bearer {cfg['token']}"},
-                )
-                with urllib.request.urlopen(req, timeout=5) as r:
-                    lines = json.loads(r.read().decode())
-                from vexcom import BUS_PATH
-                BUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-                existing = set()
-                if BUS_PATH.exists():
-                    for raw in BUS_PATH.read_text(encoding="utf-8").strip().splitlines():
-                        existing.add(raw.strip())
-                with open(BUS_PATH, "a", encoding="utf-8") as f:
-                    for entry in lines:
-                        line = json.dumps(entry, ensure_ascii=False)
-                        if line not in existing:
-                            f.write(line + "\n")
-                            existing.add(line)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-
 async def run_bus_watcher(db_path: str) -> None:
     """Fast loop: ingest bus + poll peer /bus + check for updates every 30s."""
+    import urllib.request
+
     while True:
         await asyncio.sleep(BUS_WATCH_INTERVAL)
-        await asyncio.to_thread(_bus_tick)
+        # Ingest local bus
+        try:
+            from vexcom import ingest_bus
+            ingest_bus()
+        except Exception:
+            pass
+        # Poll peer /bus endpoints
+        try:
+            from peers import load_peers
+            peers_cfg = load_peers()["peers"]
+            for name, cfg in peers_cfg.items():
+                try:
+                    req = urllib.request.Request(
+                        f"{cfg['url']}/bus?n=50",
+                        headers={"Authorization": f"Bearer {cfg['token']}"},
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        lines = json.loads(r.read().decode())
+                    from vexcom import BUS_PATH
+                    BUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+                    existing = set()
+                    if BUS_PATH.exists():
+                        for raw in BUS_PATH.read_text(encoding="utf-8").strip().splitlines():
+                            existing.add(raw.strip())
+                    with open(BUS_PATH, "a", encoding="utf-8") as f:
+                        for entry in lines:
+                            line = json.dumps(entry, ensure_ascii=False)
+                            if line not in existing:
+                                f.write(line + "\n")
+                                existing.add(line)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # Check for auto-updates (BOOTSTRAP messages)
+        try:
+            from updater import process_updates
+            result = process_updates()
+            if result.get("updated"):
+                import sys
+                print(f"UPDATER: applied {len(result.get('actions', []))} update(s)", file=sys.stderr)
+        except Exception:
+            pass

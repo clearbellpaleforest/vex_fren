@@ -11,6 +11,7 @@ recall(query, k) ranks matches by relevance, not recency:
 
 Empty / no-match query -> most-recent entries (graceful default).
 
+Chamberlain: one recall function. The embedding channel is the planned upgrade
 (A2/brain): add it as a third relevance signal and fuse with RRF once a model
 exists. Until then, coverage-first lexical ranking is correct and model-free.
 """

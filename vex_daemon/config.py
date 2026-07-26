@@ -28,6 +28,7 @@ MEMORY_DIR = VEX_HOME / "vex_memory"
 DB_PATH = VEX_HOME / "vex.db"
 TOKEN_PATH = VEX_HOME / ".vex_token"
 MCP_CONFIG_PATH = VEX_HOME / "vex_mcp_config.json"
+BRAIN_CONFIG_PATH = VEX_HOME / ".vex_brain.json"
 
 # ── Filesystem roots the tools may touch ──
 # Override with $VEX_SAFE_ROOTS (colon-separated) for other machines.
@@ -46,7 +47,3 @@ WORK_DIR = Path(_work)
 
 # Instance identity — used by vexcom for sender naming
 VEX_INSTANCE = os.environ.get("VEX_INSTANCE", os.uname().nodename)
-
-# Watch identity — messages relayed from the wrist are from Aldous, not from Vex.
-# Replies addressed to this recipient are what GET /ask/replies serves back.
-WATCH_SENDER = "aldous@watch"

@@ -8,6 +8,7 @@ one envelope and one authoritative store (the `messages` table), keeps
 the same `mem_fts` memory index (src='message'), so recall()/reconstruct() see
 comms as memory. Comms and memory are one log.
 
+Chamberlain: one envelope, one send, one inbox, one log. Idempotent reindex.
 """
 
 import hashlib
@@ -54,11 +55,7 @@ def _bus_line(e: dict) -> dict:
 
 
 def _bus_hash(line: dict) -> str:
-    # Hash on (session_id, from, body_prefix) — NOT timestamp.
-    # Timestamps differ when a message is relayed, which caused duplicates
-    # under the old (timestamp, from, body) key.
-    body = line.get("body", "") or ""
-    key = f"{line.get('session_id','')}|{line.get('from','')}|{body[:100]}"
+    key = f"{line.get('timestamp','')}|{line.get('from','')}|{line.get('body','')}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
@@ -66,25 +63,6 @@ def ensure_bus_seen(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE TABLE IF NOT EXISTS bus_seen (hash TEXT PRIMARY KEY, msg_id INTEGER)"
     )
-
-
-def ensure_messages(conn: sqlite3.Connection) -> None:
-    """Same DDL as daemon.init_db() — vexcom must work on a fresh DB too
-    (tests, mesh-GUI direct-write fallback, CLI use without the daemon)."""
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=5000")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            sender TEXT NOT NULL,
-            recipient TEXT NOT NULL DEFAULT 'broadcast',
-            body TEXT NOT NULL,
-            session_id TEXT,
-            msg_type TEXT DEFAULT 'message',
-            read INTEGER DEFAULT 0
-        )
-    """)
 
 
 def _index_message(conn, ref: str, e: dict) -> None:
@@ -116,7 +94,6 @@ def send(env: dict, db_path=DB_PATH) -> dict:
     try:
         ensure_schema(conn)
         ensure_bus_seen(conn)
-        ensure_messages(conn)
         cur = conn.execute(
             "INSERT INTO messages (created_at, sender, recipient, body, session_id, msg_type) "
             "VALUES (?,?,?,?,?,?)",
@@ -193,7 +170,6 @@ def ingest_bus(db_path=DB_PATH) -> int:
     try:
         ensure_schema(conn)
         ensure_bus_seen(conn)
-        ensure_messages(conn)
         seen = {r[0] for r in conn.execute("SELECT hash FROM bus_seen")}
         n = 0
         with open(BUS_PATH, "r", encoding="utf-8") as f:
@@ -225,66 +201,6 @@ def ingest_bus(db_path=DB_PATH) -> int:
         return n
     finally:
         conn.close()
-
-
-def compact_bus(keep: int = 1000, db_path=DB_PATH) -> dict:
-    """Rotate old bus lines to a dated archive, keep last N in live file.
-
-    Idempotent — safe to call on every tick. The archive path is
-    vex_bus.{YYYY-MM-DD}.jsonl alongside the live bus file.
-    """
-    if not BUS_PATH.exists():
-        return {"ok": True, "compacted": False, "reason": "no bus file"}
-
-    try:
-        lines = BUS_PATH.read_text(encoding="utf-8").strip().splitlines()
-    except OSError:
-        return {"ok": False, "error": "cannot read bus file"}
-
-    if len(lines) <= keep:
-        return {"ok": True, "compacted": False, "reason": f"{len(lines)} lines, under {keep} limit"}
-
-    # Rotate oldest lines to dated archive
-    overflow = lines[:-keep]
-    keep_lines = lines[-keep:]
-    archive_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    archive_path = BUS_PATH.parent / f"vex_bus.{archive_date}.jsonl"
-
-    try:
-        with open(archive_path, "a", encoding="utf-8") as f:
-            for line in overflow:
-                f.write(line + "\n")
-    except OSError:
-        return {"ok": False, "error": "cannot write archive"}
-
-    # Write compacted live file
-    try:
-        BUS_PATH.write_text("\n".join(keep_lines) + ("\n" if keep_lines else ""), encoding="utf-8")
-    except OSError:
-        return {"ok": False, "error": "cannot write compacted bus"}
-
-    return {"ok": True, "compacted": True, "archived": len(overflow),
-            "kept": len(keep_lines), "archive": str(archive_path)}
-
-
-def _max_ts_in_bus() -> str:
-    """Return the ISO timestamp of the newest bus line, or epoch."""
-    if not BUS_PATH.exists():
-        return "1970-01-01T00:00:00Z"
-    try:
-        lines = BUS_PATH.read_text(encoding="utf-8").strip().splitlines()
-        latest = "1970-01-01T00:00:00Z"
-        for raw in reversed(lines):
-            try:
-                b = json.loads(raw)
-                ts = b.get("timestamp") or b.get("ts") or ""
-                if ts > latest:
-                    latest = ts
-            except (json.JSONDecodeError, KeyError):
-                pass
-        return latest
-    except OSError:
-        return "1970-01-01T00:00:00Z"
 
 
 if __name__ == "__main__":

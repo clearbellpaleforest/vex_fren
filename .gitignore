@@ -4,10 +4,6 @@ __pycache__/
 *.pyc
 .DS_Store
 
-# ── Node modules ──
-node_modules/
-package-lock.json
-
 # ── Python build artifacts ──
 build/
 dist/
@@ -16,6 +12,9 @@ dist/
 # ── Databases ──
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
+*.log
 
 # ── Secrets ──
 *_key.txt
@@ -23,9 +22,6 @@ vex_fen_agent_key.txt
 .vex_token
 *.pem
 *.key
-
-# ── Log files ──
-*.log
 
 # ── Binary transfer artifacts (build/regenerate locally, never commit) ──
 *.tar.gz
@@ -48,7 +44,6 @@ vex_meta_state.json
 vex_memory/*.jsonl
 vex_workspace/vex_bus.jsonl
 vex_workspace/vex_group_chat_log.jsonl
-vex_workspace/vex_sessions.jsonl
 vex_workspace/john-update-email.txt
 vex_workspace/ledger.json
 vex_workspace/tasks/

@@ -609,23 +609,6 @@ def main() -> None:
         cmd_inbox()
     elif cmd == "poke":
         cmd_poke_peer(sys.argv[2] if len(sys.argv) > 2 else "")
-    elif cmd == "fleet":
-        from .operations import fleet_status as _fs
-        print(json.dumps(_fs(), indent=2))
-    elif cmd == "pulse":
-        from .operations import pulse as _pulse
-        print(json.dumps(_pulse(), indent=2))
-    elif cmd == "db":
-        from .operations import db_inspect as _dbi
-        print(json.dumps(_dbi(sys.argv[2] if len(sys.argv) > 2 else None), indent=2))
-    elif cmd == "ship":
-        from .operations import ship as _ship
-        repo = sys.argv[2] if len(sys.argv) > 2 else ""
-        msg = " ".join(sys.argv[3:]) if len(sys.argv) > 3 else ""
-        if not repo or not msg:
-            print("Usage: vex ship <repo> <message>", file=sys.stderr)
-            sys.exit(1)
-        print(json.dumps(_ship(repo, msg), indent=2))
     elif cmd in ("help", "-h", "--help"):
         print(USAGE)
     else:

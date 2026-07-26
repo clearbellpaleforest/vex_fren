@@ -14,6 +14,7 @@ history_reach = indexed episodes / episodes on disk. Under the old
 newest-file-only load this was ~1/N; with the index it is ~1.0 — the number
 literally measures the fix.
 
+Chamberlain: one reconstruct function. Self-heals a stale index on wake.
 """
 
 import json

@@ -6,16 +6,18 @@ reconstruct() can load a compact digest for old months instead of every raw
 episode — nothing falls off the edge as history grows.
 
 Model-free by design: the digest is deterministic extraction (dates, first-line
-summaries, decisions). A live Vex session can rewrite `text` without changing
-the record shape or any caller.
+summaries, decisions). Abstractive (LLM) consolidation is a clean later upgrade
+once the brain exists — it can rewrite `text` without changing the record shape
+or any caller.
 
+Chamberlain: one consolidation job, one summaries table, idempotent by bucket.
 """
 
 import json
 import sqlite3
 from datetime import datetime, timezone
 
-from config import DB_PATH, SELF_MODEL_PATH
+from config import DB_PATH
 from memory_index import ensure_schema, _iter_memory_docs
 
 SUMMARIES_SCHEMA = """
@@ -100,25 +102,6 @@ def consolidate(force_all: bool = False, db_path=DB_PATH) -> list[dict]:
             )
             conn.commit()
             done.append({"bucket": month, "sessions": len(episodes), "source_ids": refs})
-
-        # Auto-calibrate self-model from all memory entries
-        if done:
-            try:
-                all_entries = []
-                for _, episodes in _episodes_by_month().items():
-                    for _, _, raw in episodes:
-                        try:
-                            all_entries.append(json.loads(raw))
-                        except json.JSONDecodeError:
-                            pass
-                if all_entries:
-                    from self_model import load_model, save_model, auto_calibrate
-                    model = load_model()
-                    model = auto_calibrate(model, all_entries)
-                    save_model(model)
-            except Exception:
-                pass
-
         return done
     finally:
         conn.close()

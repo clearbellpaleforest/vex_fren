@@ -43,10 +43,7 @@ def compute_mps_coherence(model: dict) -> float:
     """Compute MPS coherence as weighted EMA of capability scores.
 
     coherence = mean of [skill.estimated_skill * skill.confidence
-                         for each capability with ≥1 observation]
-
-    Capabilities with zero observations are skipped — they represent aspirations,
-    not practiced skills, and should not drag the coherence floor.
+                         for each capability]
     """
     caps = model.get("capabilities", {})
     if not caps:
@@ -54,10 +51,6 @@ def compute_mps_coherence(model: dict) -> float:
 
     scores = []
     for cap in caps.values():
-        if not isinstance(cap, dict):
-            continue
-        if cap.get("n_observations", 0) == 0:
-            continue  # Skip unobserved — don't drag the mean
         skill = cap.get("estimated_skill", 0.0)
         confidence = cap.get("confidence", 0.0)
         scores.append(skill * confidence)
@@ -103,56 +96,6 @@ def apply_delta(model: dict, domain: str, delta: float, evidence: str) -> dict:
         })
     # Keep last 50 session log entries
     model["session_log"] = logs[-50:]
-
-    return model
-
-
-def auto_calibrate(model: dict, memory_entries: list[dict]) -> dict:
-    """Scan recent memory entries for skill mentions and apply small nudges.
-
-    Each skill mention in a memory entry's `skills` list applies a +0.02 delta
-    (EMA-blended, capped at 1.0). Also increments n_observations. This lets the
-    daemon calibrate from its own records rather than waiting for a session to
-    push explicit deltas.
-
-    Returns the modified model (also mutates in place).
-    """
-    caps = model.setdefault("capabilities", {})
-    nudges: dict[str, int] = {}
-    for entry in memory_entries:
-        skills = entry.get("skills", [])
-        if isinstance(skills, list):
-            for s in skills:
-                s = str(s).lower().strip().replace(" ", "_")
-                nudges[s] = nudges.get(s, 0) + 1
-
-    for domain, count in nudges.items():
-        # Match existing capability by normalized name
-        matched = None
-        for cap_name in caps:
-            if cap_name.lower().replace(" ", "_") == domain:
-                matched = cap_name
-                break
-        if matched is None:
-            matched = domain  # New capability
-
-        cap = caps.setdefault(matched, {
-            "estimated_skill": 0.5,
-            "confidence": 0.5,
-            "n_observations": 0,
-            "evidence": [],
-        })
-        if not isinstance(cap, dict):
-            continue
-
-        # Apply small positive delta per mention (max +0.06 per domain per run)
-        delta = min(0.02 * count, 0.06)
-        old_skill = cap.get("estimated_skill", 0.5)
-        new_skill = old_skill * 0.90 + (old_skill + delta) * 0.10
-        cap["estimated_skill"] = round(min(1.0, new_skill), 4)
-        cap["confidence"] = round(min(1.0, cap.get("confidence", 0.5) + 0.005 * count), 4)
-        cap["n_observations"] = cap.get("n_observations", 0) + count
-        cap["last_evaluated"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     return model
 
