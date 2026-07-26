@@ -280,6 +280,43 @@ foreach ($f in $stateFiles.Keys) {
     }
 }
 
+# ── DeepSeek API key ────────────────────────────────────────────────────
+
+Write-Host "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor DarkGray
+Write-Host "  STEP 2: DeepSeek API Key`n" -ForegroundColor Cyan
+
+Write-Host "  This is the brain. Vex + FEN use DeepSeek to think." -ForegroundColor White
+Write-Host "  Without a key, the mesh + chat still work — but no AI replies.`n" -ForegroundColor DarkGray
+
+Write-Host "  How to get a key (takes 2 minutes, costs ~$2 to start):" -ForegroundColor DarkGray
+Write-Host "    1. Go to https://platform.deepseek.com" -ForegroundColor DarkGray
+Write-Host "    2. Sign up (email or Google)" -ForegroundColor DarkGray
+Write-Host "    3. Click 'API Keys' in the sidebar" -ForegroundColor DarkGray
+Write-Host "    4. Create a new key — it starts with 'sk-'" -ForegroundColor DarkGray
+Write-Host "    5. Top up with $2 (DeepSeek is cheap — ~$0.14 per million tokens)`n" -ForegroundColor DarkGray
+
+if ($env:DEEPSEEK_API_KEY) {
+    $apiKey = $env:DEEPSEEK_API_KEY
+    Write-Host "  Using key from environment" -ForegroundColor Green
+} else {
+    Write-Host "  Paste your key now, or press Enter to skip (you can add it later):" -ForegroundColor White
+    $apiKey = Read-Host "  DeepSeek API key (starts with sk-)"
+}
+
+if ($apiKey -and $apiKey.StartsWith("sk-")) {
+    # Write to both Vex and FEN config
+    $apiKey | Out-File -FilePath "$VEX_HOME\.deepseek_key" -Encoding utf8 -NoNewline
+    # Also append to a .env-style file for FEN
+    "DEEPSEEK_API_KEY=$apiKey" | Out-File -FilePath "$VEX_HOME\.env" -Encoding utf8
+    Write-Host "  [ok] API key saved. Your AI has a brain! 🧠" -ForegroundColor Green
+} elseif ($apiKey) {
+    Write-Host "  [warn] That does not look like a DeepSeek key (should start with sk-). Skipping." -ForegroundColor Yellow
+    Write-Host "  You can add it later: edit $VEX_HOME\.env and add DEEPSEEK_API_KEY=your-key" -ForegroundColor DarkGray
+} else {
+    Write-Host "  [info] No key entered. The chat + mesh will work, but AI replies need a key." -ForegroundColor Yellow
+    Write-Host "  To add one later: edit $VEX_HOME\.env and add DEEPSEEK_API_KEY=your-key" -ForegroundColor DarkGray
+}
+
 # ── Create virtual environment ────────────────────────────────────────────
 
 Write-Host "`n[info] Creating Python virtual environment..." -ForegroundColor Cyan

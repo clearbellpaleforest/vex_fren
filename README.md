@@ -57,6 +57,34 @@ curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/in
 
 **That's it.** The installer asks your name, lets you name your AI, and sets everything up. Double-click the launcher on your desktop (or find it in your app menu on Linux), and your browser opens to the chat.
 
+---
+
+## 🧠 The Brain: DeepSeek API Key
+
+Your AI needs a brain to think. Vex and FEN use **DeepSeek** — a language model that costs about **$0.14 per million tokens** (a few dollars lasts months of personal use).
+
+**Without a key:** the mesh chat works, messages flow, the daemon runs — but no AI-generated replies.  
+**With a key:** your AI thinks, responds, remembers, and converses.
+
+### How to get one (2 minutes)
+
+1. Go to **[platform.deepseek.com](https://platform.deepseek.com)** and sign up
+2. Click **API Keys** → **Create new key** (it starts with `sk-`)
+3. Top up with **$2–5** — that's enough for months of personal use
+4. The installer asks for your key, or you can add it later:
+
+```bash
+# Windows (PowerShell)
+$env:DEEPSEEK_API_KEY = "sk-your-key-here"
+
+# Linux / macOS
+export DEEPSEEK_API_KEY="sk-your-key-here"
+```
+
+Or create a `.env` file in your Vex home folder with `DEEPSEEK_API_KEY=sk-your-key-here`.
+
+---
+
 > 💡 On Windows, say **yes** when the installer asks about autostart to have your AI launch at login.
 
 ---
