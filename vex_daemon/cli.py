@@ -345,12 +345,20 @@ def cmd_import_bundle(bundle_path: str) -> None:
                 if not os.path.exists(dst):
                     shutil.copy2(src, dst)
 
-        # Run setup.sh if present
-        setup_script = os.path.join(target, "setup.sh")
-        if os.path.exists(setup_script):
-            print("Running setup...")
-            sp.run(["bash", setup_script], cwd=target, check=False,
-                   env={**os.environ, "VEX_HOME": target, "CREATOR": os.environ.get("CREATOR", "aldous")})
+        # Run setup script if present (platform-aware)
+        if sys.platform == "win32":
+            setup_script = os.path.join(target, "install.ps1")
+            if os.path.exists(setup_script):
+                print("Running Windows setup...")
+                sp.run(["powershell", "-ExecutionPolicy", "Bypass", "-File", setup_script],
+                       cwd=target, check=False,
+                       env={**os.environ, "VEX_HOME": target, "CREATOR": os.environ.get("CREATOR", "aldous")})
+        else:
+            setup_script = os.path.join(target, "setup.sh")
+            if os.path.exists(setup_script):
+                print("Running setup...")
+                sp.run(["bash", setup_script], cwd=target, check=False,
+                       env={**os.environ, "VEX_HOME": target, "CREATOR": os.environ.get("CREATOR", "aldous")})
 
     print("Import complete. Start the daemon:")
     print(f"  cd {target} && VEX_HOST=0.0.0.0 .venv/bin/python3 -m vex_daemon.daemon")

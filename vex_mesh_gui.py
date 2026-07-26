@@ -19,8 +19,10 @@ import sqlite3
 import ssl
 import time
 import urllib.request
+from pathlib import Path
 
-DB = os.environ.get("VEX_DB", os.path.expanduser("~/Desktop/vex/vex.db"))
+_VEX_HOME = Path(os.environ.get("VEX_HOME", os.path.expanduser("~/vex")))
+DB = os.environ.get("VEX_DB", str(_VEX_HOME / "vex.db"))
 PORT = int(os.environ.get("VEX_GUI_PORT", "8600"))
 
 # ── Redaction: never leak secrets into the UI ─────────────────────────────

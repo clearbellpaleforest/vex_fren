@@ -10,6 +10,7 @@ without editing hardcoded absolute paths.
 """
 
 import os
+import platform
 import socket
 from pathlib import Path
 
@@ -17,7 +18,6 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 VEX_HOME = Path(os.environ.get("VEX_HOME", _REPO_ROOT))
-VEX_INSTANCE = os.environ.get("VEX_INSTANCE", socket.gethostname())
 
 # ── Identity & state files ──
 SEED_PATH = VEX_HOME / "vex_seed.txt"
@@ -46,4 +46,4 @@ SAFE_ROOTS = [
 WORK_DIR = Path(_work)
 
 # Instance identity — used by vexcom for sender naming
-VEX_INSTANCE = os.environ.get("VEX_INSTANCE", os.uname().nodename)
+VEX_INSTANCE = os.environ.get("VEX_INSTANCE", platform.node())

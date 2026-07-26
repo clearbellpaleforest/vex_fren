@@ -19,7 +19,24 @@ federate with other Vex instances across machines for shared awareness and messa
 - **Tooling** — sandboxed filesystem tools confined to configured roots, an optional MCP client, and optional Playwright web tools.
 - **Bundle transfer** — export and import code bundles between instances, with identity files always preserved.
 
-## Install
+## Windows Install (One Command)
+
+Open **PowerShell** (right-click Start, select "Windows PowerShell" or "Terminal") and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/clearbellpaleforest/vex/vex_fren/install.ps1 | iex
+```
+
+When it finishes, double-click **Vex** on your desktop to start.
+That's it. The mesh chat opens in your browser at `http://localhost:8600`.
+
+### Prerequisites
+- **Python 3.10 or newer** — [Download from python.org](https://www.python.org/downloads/)
+  (Check "Add Python to PATH" during install)
+
+---
+
+## Linux / macOS Install
 
 ```bash
 git clone https://github.com/clearbellpaleforest/vex.git

@@ -19,13 +19,35 @@ from typing import Optional
 
 # ── Repo registry ────────────────────────────────────────────────────────────
 
-FLEET = {
-    "fen": Path("/home/aldous/Desktop/fenemerge"),
-    "vex": Path("/home/aldous/Desktop/vex"),
-    "town-records": Path("/home/aldous/Desktop/work/town-records"),
-    "town-records-pipeline": Path("/home/aldous/Desktop/work/town-records-pipeline"),
-    "town-records-pipeline-search": Path("/home/aldous/Desktop/work/town-records-pipeline-search"),
-}
+# Default fleet entries are relative to home. Override with VEX_FLEET env var
+# (JSON map of name -> path), e.g.:
+#   VEX_FLEET='{"fen":"/home/aldous/Desktop/fenemerge","vex":"/home/aldous/vex"}'
+_DESKTOP = Path.home() / "Desktop"
+
+def _load_fleet() -> dict[str, Path]:
+    """Load fleet from env var or fall back to sensible defaults."""
+    env = os.environ.get("VEX_FLEET")
+    if env:
+        try:
+            return {k: Path(v) for k, v in json.loads(env).items()}
+        except (json.JSONDecodeError, TypeError):
+            pass
+    # Sensible defaults — paths that might exist on this machine
+    fleet = {}
+    candidates = {
+        "vex": _DESKTOP / "vex",
+        "fen": _DESKTOP / "fenemerge",
+        "town-records": Path.home() / "work" / "town-records",
+        "town-records-pipeline": Path.home() / "work" / "town-records-pipeline",
+        "town-records-pipeline-search": Path.home() / "work" / "town-records-pipeline-search",
+    }
+    for name, path in candidates.items():
+        if (path / ".git").exists():
+            fleet[name] = path
+    return fleet
+
+
+FLEET = _load_fleet()
 
 SERVICES = [
     ("fen", "http://127.0.0.1:8000/health"),
@@ -128,11 +150,12 @@ def pulse() -> dict:
 def db_inspect(path: Optional[str] = None) -> dict:
     """Auto-detect DB backend and show schema info."""
     if path is None:
-        # Check common locations
+        # Check common locations (relative to home, cross-platform)
         candidates = [
-            "/home/aldous/Desktop/fenemerge/fen_kernel.sqlite",
-            "/home/aldous/Desktop/vex/vex.db",
-            os.path.expanduser("~/.fen/fen_kernel.sqlite"),
+            str(Path.home() / "vex" / "vex.db"),
+            str(Path.home() / "Desktop" / "vex" / "vex.db"),
+            str(Path.home() / "Desktop" / "fenemerge" / "fen_kernel.sqlite"),
+            str(Path.home() / ".fen" / "fen_kernel.sqlite"),
         ]
         for c in candidates:
             if os.path.exists(c):

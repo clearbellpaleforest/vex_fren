@@ -31,7 +31,10 @@ def _load_or_create_token() -> str:
             return token
     token = secrets.token_urlsafe(32)
     TOKEN_PATH.write_text(token)
-    os.chmod(TOKEN_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    try:
+        os.chmod(TOKEN_PATH, stat.S_IRUSR | stat.S_IWUSR)  # 0600
+    except OSError:
+        pass  # Windows / read-only FS — file defaults apply
     return token
 
 
