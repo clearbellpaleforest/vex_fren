@@ -36,8 +36,8 @@ PYTHON=""
 for cmd in python3 python; do
     if command -v "$cmd" &>/dev/null; then
         ver=$("$cmd" --version 2>&1)
-        major=$(echo "$ver" | grep -oP '\d+' | head -1)
-        minor=$(echo "$ver" | grep -oP '\d+' | sed -n '2p')
+        major=$(echo "$ver" | grep -Eo '[0-9]+' | head -1)
+        minor=$(echo "$ver" | grep -Eo '[0-9]+' | sed -n '2p')
         if [ -n "$major" ] && [ "$major" -ge 3 ]; then
             if [ "$major" -gt 3 ] || [ "${minor:-0}" -ge 10 ]; then
                 PYTHON="$cmd"
@@ -164,7 +164,7 @@ else
     echo "  And what's your name?"
     echo ""
     read -r -p "  Your name: " input
-    creator="${input:-$USER}"
+    creator="${input:-${USER:-$(whoami)}}"
 fi
 
 DATE=$(date +%Y-%m-%d)
@@ -189,7 +189,7 @@ fi
 
 # ── Sanitize for sed ──────────────────────────────────────────────────
 
-sanitize() { echo "$1" | sed 's/[\/&]/\\&/g'; }
+sanitize() { echo "$1" | sed 's/[\/&\]/\\&/g' | tr '\n' ' '; }
 
 s_ai_name=$(sanitize "$ai_name")
 s_given=$(sanitize "$given")
@@ -205,8 +205,17 @@ echo "[ok] Created directories"
 
 if $IS_REMOTE; then
     echo "[info] Downloading vex_fren from GitHub..."
-    TMP_ZIP="$(mktemp -d)/vex_fren.zip"
-    TMP_DIR="$(mktemp -d)"
+    # Check for required tools
+    if ! command -v unzip &>/dev/null; then
+        echo "[ERROR] Need 'unzip' to extract the download. Install it:"
+        echo "         Ubuntu/Debian: sudo apt install unzip"
+        echo "         Fedora:        sudo dnf install unzip"
+        echo "         Arch:          sudo pacman -S unzip"
+        exit 1
+    fi
+
+    TMP_ZIP=$(mktemp /tmp/vex_fren_dl_XXXXXX.zip)
+    TMP_DIR=$(mktemp -d)
 
     if command -v curl &>/dev/null; then
         curl -sSL -o "$TMP_ZIP" "https://github.com/clearbellpaleforest/vex_fren/archive/refs/heads/main.zip"
@@ -214,6 +223,8 @@ if $IS_REMOTE; then
         wget -q -O "$TMP_ZIP" "https://github.com/clearbellpaleforest/vex_fren/archive/refs/heads/main.zip"
     else
         echo "[ERROR] Need curl or wget to download. Install one and try again."
+        rm -f "$TMP_ZIP"
+        rmdir "$TMP_DIR" 2>/dev/null || true
         exit 1
     fi
 
@@ -264,12 +275,26 @@ else
     echo "[skip] vex_self_model.json already exists"
 fi
 
-# State files
-echo "# $ai_name Diary — $DATE"$'\n'"$ai_name $given installed on Linux by $creator."$'\n' \
-    > "$VEX_HOME/vex_diary.txt"
-echo '{"mcpServers": {}}' > "$VEX_HOME/vex_mcp_config.json"
-echo '{"peers": {}}' > "$VEX_HOME/vex_peers.json"
-echo "[ok] Created state files"
+# State files — only create if they don't exist (safe to re-run installer)
+if [ ! -f "$VEX_HOME/vex_diary.txt" ]; then
+    echo "# $ai_name Diary — $DATE"$'\n'"$ai_name $given installed on Linux by $creator."$'\n' \
+        > "$VEX_HOME/vex_diary.txt"
+    echo "[ok] Created vex_diary.txt"
+else
+    echo "[skip] vex_diary.txt already exists"
+fi
+if [ ! -f "$VEX_HOME/vex_mcp_config.json" ]; then
+    echo '{"mcpServers": {}}' > "$VEX_HOME/vex_mcp_config.json"
+    echo "[ok] Created vex_mcp_config.json"
+else
+    echo "[skip] vex_mcp_config.json already exists"
+fi
+if [ ! -f "$VEX_HOME/vex_peers.json" ]; then
+    echo '{"peers": {}}' > "$VEX_HOME/vex_peers.json"
+    echo "[ok] Created vex_peers.json"
+else
+    echo "[skip] vex_peers.json already exists"
+fi
 
 # ── Create virtual environment ────────────────────────────────────────
 
@@ -288,7 +313,7 @@ echo "[ok] Virtual environment ready"
 # ── Install the package ───────────────────────────────────────────────
 
 echo "[info] Installing vex-daemon..."
-if "$VEX_HOME/.venv/bin/python" -m pip install --quiet . 2>&1; then
+if "$VEX_HOME/.venv/bin/python" -m pip install --quiet . 2>/dev/null; then
     echo "[ok] vex-daemon installed"
 else
     echo "[ERROR] Package install failed. Check your internet connection and try again."
@@ -313,7 +338,7 @@ echo "[ok] Created desktop launcher: $ai_name"
 # Symlink for CLI convenience
 mkdir -p "$HOME/.local/bin"
 ln -sf "$VEX_HOME/.venv/bin/vex" "$HOME/.local/bin/vex" 2>/dev/null || true
-if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+if ! echo ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
     echo "[info] Add ~/.local/bin to your PATH to use the 'vex' command:"
     echo "       echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
 fi

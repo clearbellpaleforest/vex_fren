@@ -57,7 +57,7 @@ curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/in
 
 **That's it.** The installer asks your name, lets you name your AI, and sets everything up. Double-click the launcher on your desktop (or find it in your app menu on Linux), and your browser opens to the chat.
 
-> 💡 Want your AI to start when you turn on your computer? Say **yes** when the installer asks about autostart.
+> 💡 On Windows, say **yes** when the installer asks about autostart to have your AI launch at login.
 
 ---
 
@@ -170,6 +170,8 @@ Remove-Item -Recurse $env:USERPROFILE\vex
 
 # Linux / macOS
 rm -rf ~/vex
+rm -f ~/.local/share/applications/vex.desktop
+rm -f ~/.local/bin/vex
 ```
 
 Then delete the desktop shortcut. That's it — Vex doesn't install anything outside its home folder.
