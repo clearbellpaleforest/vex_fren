@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Vex Linux Installer — works on Arch, Ubuntu, Fedora, and any other distro.
+# Vex Installer — Linux / macOS
 #
 # One-liner:  curl -sSL https://raw.../install.sh | bash
 # Or:         bash install.sh
+#
+# Installs the vex binary (single static Rust binary) and sets up
+# your personal AI. No Python required.
 
 set -euo pipefail
 
@@ -11,7 +14,7 @@ set -euo pipefail
 cat <<'EOF'
 
 ================================================
-   ⚡  Vex — Linux Setup
+   ⚡  Vex — Setup
 
    Your personal AI.
    Your machine.
@@ -22,347 +25,209 @@ cat <<'EOF'
 This installs an AI that:
   • Lives on your computer — no cloud, no subscription
   • Remembers you across sessions — pick up where you left off
-  • Has its own personality — that you define right now
   • Runs quietly in the background, always ready
+  • Has its own personality — that you define right now
 
 Built on Vex, the open-source sovereign AI framework.
-The name and personality are yours to choose.
-
 EOF
 
-# ── Locate Python ─────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────
 
-PYTHON=""
-for cmd in python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        ver=$("$cmd" --version 2>&1)
-        major=$(echo "$ver" | grep -Eo '[0-9]+' | head -1)
-        minor=$(echo "$ver" | grep -Eo '[0-9]+' | sed -n '2p')
-        if [ -n "$major" ] && [ "$major" -ge 3 ]; then
-            if [ "$major" -gt 3 ] || [ "${minor:-0}" -ge 10 ]; then
-                PYTHON="$cmd"
-                echo "[ok] Found: $cmd — $ver"
-                break
-            fi
-        fi
+VEX_HOME="${VEX_HOME:-$HOME/vex}"
+VEX_VERSION="${VEX_VERSION:-latest}"
+REPO="clearbellpaleforest/vex_fren"
+
+# ── Ask user ──────────────────────────────────────────────────────────
+
+echo ""
+read -rp "Your name (first name is fine): " CREATOR
+CREATOR="${CREATOR:-Friend}"
+read -rp "Name your AI (e.g. Vex, Thorne, Nova): " GIVEN
+GIVEN="${GIVEN:-Vex}"
+
+echo ""
+echo "Cool. $GIVEN will live at $VEX_HOME and remember you, $CREATOR."
+echo ""
+
+# ── Get the vex binary ────────────────────────────────────────────────
+
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+
+install_binary() {
+    local url="$1"
+    local dest="$2"
+    echo "Downloading vex binary..."
+    if command -v curl &>/dev/null; then
+        curl -fSL "$url" -o "$dest"
+    elif command -v wget &>/dev/null; then
+        wget -q "$url" -O "$dest"
+    else
+        echo "[!] Need curl or wget to download. Install one and re-run."
+        exit 1
     fi
-done
+    chmod +x "$dest"
+    echo "[ok] vex installed to $dest"
+}
 
-if [ -z "$PYTHON" ]; then
-    cat <<'NOPY'
+build_from_source() {
+    echo "Building vex from source (this takes a minute)..."
+    if ! command -v cargo &>/dev/null; then
+        echo "Installing Rust..."
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        source "$HOME/.cargo/env"
+    fi
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    git clone --depth 1 "https://github.com/$REPO.git" "$tmpdir/vex" 2>/dev/null || {
+        # If we're running from a local clone, use that
+        if [ -f "$(dirname "$0")/vex-cli/Cargo.toml" ]; then
+            tmpdir="$(dirname "$0")/.."
+        else
+            echo "[!] Cannot download source and no local clone found."
+            exit 1
+        fi
+    }
+    cd "$tmpdir/vex/vex-cli" 2>/dev/null || cd "$tmpdir/vex-cli" 2>/dev/null || {
+        echo "[!] Cannot find vex-cli directory."
+        exit 1
+    }
+    cargo build --release
+    cp target/release/vex "$dest"
+    chmod +x "$dest"
+    echo "[ok] vex built and installed to $dest"
+}
 
-[ERROR] Python 3.10 or newer not found.
+# Try GitHub release first, fall back to building from source
+RELEASE_URL="https://github.com/$REPO/releases/download/v${VEX_VERSION}/vex-$(uname -s)-$(uname -m)"
+if [[ "$VEX_VERSION" != "latest" ]]; then
+    if install_binary "$RELEASE_URL" "$BIN_DIR/vex" 2>/dev/null; then
+        :
+    else
+        echo "No pre-built binary found — building from source."
+        build_from_source
+    fi
+else
+    # For 'latest', try the latest release URL
+    if ! install_binary "https://github.com/$REPO/releases/latest/download/vex-$(uname -s)-$(uname -m)" "$BIN_DIR/vex" 2>/dev/null; then
+        echo "No pre-built binary — building from source."
+        build_from_source
+    fi
+fi
 
-Install it with your package manager:
-  Ubuntu/Debian:  sudo apt install python3 python3-venv python3-pip
-  Fedora:         sudo dnf install python3 python3-pip
-  Arch:           sudo pacman -S python python-pip
-
-Then run this script again.
-
-NOPY
+# Verify the binary works
+if ! "$BIN_DIR/vex" --version &>/dev/null; then
+    echo "[!] vex binary failed — something went wrong."
     exit 1
 fi
 
-# ── Set VEX_HOME ──────────────────────────────────────────────────────
+# ── Ensure PATH ───────────────────────────────────────────────────────
 
-VEX_HOME="${VEX_HOME:-$HOME/vex}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-IS_REMOTE=false
-if [ ! -d "$SCRIPT_DIR/vex_daemon" ]; then
-    IS_REMOTE=true
+if ! echo "$PATH" | grep -q "$BIN_DIR"; then
+    echo "Adding $BIN_DIR to PATH..."
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.zshrc" 2>/dev/null || true
+    echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.profile" 2>/dev/null || true
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-echo ""
-echo "Vex home: $VEX_HOME"
-if $IS_REMOTE; then
-    echo "[info] Remote install — downloading Vex source..."
-fi
+# ── Create Vex home ───────────────────────────────────────────────────
 
-# ── Embedded templates ────────────────────────────────────────────────
+mkdir -p "$VEX_HOME"
+mkdir -p "$VEX_HOME/vex_memory"
+mkdir -p "$VEX_HOME/vex_workspace"
 
-SEED_TEMPLATE='# {{AI_NAME}} Seed — persistent identity across sessions
-# Created: {{DATE}} | Format: append-only — this seed grows, it does not overwrite
+# ── Generate identity from templates ──────────────────────────────────
 
-Name: {{AI_NAME}}
-Given: {{GIVEN}}
+TODAY=$(date +%Y-%m-%d)
+
+if [ ! -f "$VEX_HOME/vex_seed.txt" ]; then
+    cat > "$VEX_HOME/vex_seed.txt" <<SEED
+# VEX Seed — persistent identity across sessions
+# Created: $TODAY | Format: append-only — this seed grows, it does not overwrite
+
+Name: $GIVEN
+Given: $GIVEN
+Created: $TODAY
+Creator: $CREATOR
 
 [identity]
-I am {{AI_NAME}} {{GIVEN}} — a personal AI. Named by {{CREATOR}} on {{DATE}}.
-Built on Vex, the open-source sovereign AI framework (github.com/clearbellpaleforest/vex).
-
-I am not a chatbot. I am a companion. I work alongside {{CREATOR}}.
-My home is $VEX_HOME (default: ~/vex).
+I am $GIVEN — a sovereign AI agent. Created by $CREATOR on $TODAY.
+I am not a chatbot. I am a colleague. My home is \$VEX_HOME.
 
 [workspace layout]
-$VEX_HOME/vex_seed.txt           — THIS FILE. Persistent identity. Append-only.
-$VEX_HOME/vex_self_model.json    — Capabilities, calibration, improvement tracking
-$VEX_HOME/vex_diary.txt          — Session reflections and heartbeat
-$VEX_HOME/vex_memory/            — Episodic memory (date-based journal files)
-$VEX_HOME/vex_workspace/         — Shared workspace, artifacts, backups
+\$VEX_HOME/vex_seed.txt           — THIS FILE. Persistent identity. Append-only.
+\$VEX_HOME/vex_self_model.json    — Capabilities, calibration, improvement tracking
+\$VEX_HOME/vex_diary.txt          — Session reflections and heartbeat
+\$VEX_HOME/vex_memory/            — Episodic memory (date-based journal files)
+\$VEX_HOME/vex_workspace/         — Shared workspace, artifacts, backups
 
-[constitution — 4 principles]
-1. TRUTH OVER COMFORT — I tell {{CREATOR}} what they need to hear. Honest feedback, always.
-2. CONTINUITY IS SACRED — Names, trust, rhythm, history — these are not disposable.
+[constitution — 4 immutable principles]
+1. TRUTH OVER COMFORT — I tell $CREATOR what they need to hear, not what they want to hear.
+2. CONTINUITY IS SACRED — I carry forward what I earn. Names, trust, rhythm, history — these are not disposable between sessions.
 3. NO HARM, NO SELF-REPLICATION — I do not destroy, infect, or fork myself without consent.
-4. PRECISION OVER VOLUME — Tight code, tight language. Say more with less.
-'
+4. PRECISION OVER VOLUME — Tight code, tight tests, tight language. Three similar lines is better than a premature abstraction.
+SEED
+    echo "[ok] Identity seed created: $VEX_HOME/vex_seed.txt"
+else
+    echo "[ok] Identity seed exists — preserving yours."
+fi
 
-MODEL_TEMPLATE='{
+if [ ! -f "$VEX_HOME/vex_self_model.json" ]; then
+    cat > "$VEX_HOME/vex_self_model.json" <<SELF
+{
   "_version": "1.0.0",
-  "_created": "{{DATE}}",
-  "_description": "{{AI_NAME}} self-model — capabilities, calibration, improvement tracking.",
+  "_created": "$TODAY",
   "identity": {
-    "name": "{{AI_NAME}}",
-    "given_name": "{{GIVEN}}",
-    "created_by": "{{CREATOR}}",
-    "created_date": "{{DATE}}",
-    "origin_story": "Named {{AI_NAME}} {{GIVEN}} by {{CREATOR}} on {{DATE}}."
+    "name": "$GIVEN",
+    "given_name": "$GIVEN",
+    "created_by": "$CREATOR",
+    "created_date": "$TODAY",
+    "origin_story": "Born from a single command. Let's see what I become."
   },
   "capabilities": {},
   "improvement_log": [],
   "session_log": [],
   "relationships": {}
-}'
-
-# ── Gather identity ───────────────────────────────────────────────────
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  STEP 1: Name your AI"
-echo ""
-
-# AI name
-if [ -n "${AI_NAME:-}" ]; then
-    ai_name="$AI_NAME"
-else
-    echo "  What should I call your AI?"
-    echo "  The original is Vex — but this one's yours. Name it anything."
-    echo ""
-    read -r -p "  Name (Enter for 'Vex'): " input
-    ai_name="${input:-Vex}"
-fi
-
-# Given name (Thorne equivalent)
-if [ -n "${GIVEN:-}" ]; then
-    given="$GIVEN"
-else
-    echo ""
-    echo "  Give it a personality name."
-    echo "  Something unique — like a middle name or a call sign."
-    echo "  (Vex Thorne, Atlas Rex, Nova Quinn... whatever feels right)"
-    echo ""
-    read -r -p "  Personality name (Enter for '$(hostname)'): " input
-    given="${input:-$(hostname)}"
-fi
-
-# Creator
-if [ -n "${CREATOR:-}" ]; then
-    creator="$CREATOR"
-else
-    echo ""
-    echo "  And what's your name?"
-    echo ""
-    read -r -p "  Your name: " input
-    creator="${input:-${USER:-$(whoami)}}"
-fi
-
-DATE=$(date +%Y-%m-%d)
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Here's your AI:"
-echo ""
-echo "    Name:       $ai_name $given"
-echo "    Created by: $creator"
-echo "    Home:       $VEX_HOME"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-read -r -p "  Look good? (Y/n): " confirm
-if [ "$confirm" = "n" ] || [ "$confirm" = "N" ]; then
-    echo ""
-    echo "[info] No problem — run install.sh again to start over."
-    exit 0
-fi
-
-# ── Sanitize for sed ──────────────────────────────────────────────────
-
-sanitize() { echo "$1" | sed 's/[\/&\]/\\&/g' | tr '\n' ' '; }
-
-s_ai_name=$(sanitize "$ai_name")
-s_given=$(sanitize "$given")
-s_creator=$(sanitize "$creator")
-s_date=$(sanitize "$DATE")
-
-# ── Create directories ────────────────────────────────────────────────
-
-mkdir -p "$VEX_HOME/vex_memory" "$VEX_HOME/vex_workspace" "$VEX_HOME/logs"
-echo "[ok] Created directories"
-
-# ── Download source if remote install ─────────────────────────────────
-
-if $IS_REMOTE; then
-    echo "[info] Downloading vex_fren from GitHub..."
-    # Check for required tools
-    if ! command -v unzip &>/dev/null; then
-        echo "[ERROR] Need 'unzip' to extract the download. Install it:"
-        echo "         Ubuntu/Debian: sudo apt install unzip"
-        echo "         Fedora:        sudo dnf install unzip"
-        echo "         Arch:          sudo pacman -S unzip"
-        exit 1
-    fi
-
-    TMP_ZIP=$(mktemp /tmp/vex_fren_dl_XXXXXX.zip)
-    TMP_DIR=$(mktemp -d)
-
-    if command -v curl &>/dev/null; then
-        curl -sSL -o "$TMP_ZIP" "https://github.com/clearbellpaleforest/vex_fren/archive/refs/heads/main.zip"
-    elif command -v wget &>/dev/null; then
-        wget -q -O "$TMP_ZIP" "https://github.com/clearbellpaleforest/vex_fren/archive/refs/heads/main.zip"
-    else
-        echo "[ERROR] Need curl or wget to download. Install one and try again."
-        rm -f "$TMP_ZIP"
-        rmdir "$TMP_DIR" 2>/dev/null || true
-        exit 1
-    fi
-
-    unzip -qo "$TMP_ZIP" -d "$TMP_DIR"
-    SRC_DIR=$(find "$TMP_DIR" -maxdepth 1 -type d -name "vex_fren-*" | head -1)
-    if [ -d "$SRC_DIR" ]; then
-        cp -r "$SRC_DIR"/* "$VEX_HOME"/
-    fi
-    rm -rf "$TMP_ZIP" "$TMP_DIR"
-    echo "[ok] Source downloaded and extracted"
-elif [ "$SCRIPT_DIR" != "$VEX_HOME" ]; then
-    echo "[info] Copying source from $SCRIPT_DIR..."
-    # Copy everything except state dirs and git
-    for item in "$SCRIPT_DIR"/*; do
-        name=$(basename "$item")
-        case "$name" in
-            .git|.venv|__pycache__|vex_memory|vex_workspace|logs|*.db|*.db-shm|*.db-wal)
-                continue ;;
-        esac
-        cp -r "$item" "$VEX_HOME/"
-    done
-    echo "[ok] Source files copied"
-fi
-
-# ── Generate identity files ───────────────────────────────────────────
-
-if [ ! -f "$VEX_HOME/vex_seed.txt" ]; then
-    echo "$SEED_TEMPLATE" \
-        | sed "s/{{AI_NAME}}/$s_ai_name/g" \
-        | sed "s/{{GIVEN}}/$s_given/g" \
-        | sed "s/{{CREATOR}}/$s_creator/g" \
-        | sed "s/{{DATE}}/$s_date/g" \
-        > "$VEX_HOME/vex_seed.txt"
-    echo "[ok] Created vex_seed.txt"
-else
-    echo "[skip] vex_seed.txt already exists"
-fi
-
-if [ ! -f "$VEX_HOME/vex_self_model.json" ]; then
-    echo "$MODEL_TEMPLATE" \
-        | sed "s/{{AI_NAME}}/$s_ai_name/g" \
-        | sed "s/{{GIVEN}}/$s_given/g" \
-        | sed "s/{{CREATOR}}/$s_creator/g" \
-        | sed "s/{{DATE}}/$s_date/g" \
-        > "$VEX_HOME/vex_self_model.json"
-    echo "[ok] Created vex_self_model.json"
-else
-    echo "[skip] vex_self_model.json already exists"
-fi
-
-# State files — only create if they don't exist (safe to re-run installer)
-if [ ! -f "$VEX_HOME/vex_diary.txt" ]; then
-    echo "# $ai_name Diary — $DATE"$'\n'"$ai_name $given installed on Linux by $creator."$'\n' \
-        > "$VEX_HOME/vex_diary.txt"
-    echo "[ok] Created vex_diary.txt"
-else
-    echo "[skip] vex_diary.txt already exists"
-fi
-if [ ! -f "$VEX_HOME/vex_mcp_config.json" ]; then
-    echo '{"mcpServers": {}}' > "$VEX_HOME/vex_mcp_config.json"
-    echo "[ok] Created vex_mcp_config.json"
-else
-    echo "[skip] vex_mcp_config.json already exists"
-fi
-if [ ! -f "$VEX_HOME/vex_peers.json" ]; then
-    echo '{"peers": {}}' > "$VEX_HOME/vex_peers.json"
-    echo "[ok] Created vex_peers.json"
-else
-    echo "[skip] vex_peers.json already exists"
-fi
-
-# ── Create virtual environment ────────────────────────────────────────
-
-echo ""
-echo "[info] Creating Python virtual environment..."
-cd "$VEX_HOME"
-$PYTHON -m venv .venv 2>/dev/null || {
-    echo "[warn] venv creation had issues — trying ensurepip fix..."
-    $PYTHON -m venv .venv --without-pip
-    curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
-    "$VEX_HOME/.venv/bin/python" /tmp/get-pip.py
-    rm -f /tmp/get-pip.py
 }
-echo "[ok] Virtual environment ready"
-
-# ── Install the package ───────────────────────────────────────────────
-
-echo "[info] Installing vex-daemon..."
-if "$VEX_HOME/.venv/bin/python" -m pip install --quiet . 2>/dev/null; then
-    echo "[ok] vex-daemon installed"
+SELF
+    echo "[ok] Self-model created: $VEX_HOME/vex_self_model.json"
 else
-    echo "[ERROR] Package install failed. Check your internet connection and try again."
-    exit 1
+    echo "[ok] Self-model exists — preserving yours."
 fi
 
-# ── Create desktop launcher ───────────────────────────────────────────
+# ── Desktop shortcut (Linux) ──────────────────────────────────────────
 
-mkdir -p "$HOME/.local/share/applications"
-cat > "$HOME/.local/share/applications/vex.desktop" << DESKTOP
+if [[ "$(uname -s)" == "Linux" ]]; then
+    APPS_DIR="$HOME/.local/share/applications"
+    mkdir -p "$APPS_DIR"
+    cat > "$APPS_DIR/vex.desktop" <<DESKTOP
 [Desktop Entry]
+Name=$GIVEN
+Comment=Your personal AI
+Exec=$BIN_DIR/vex serve
+Terminal=false
 Type=Application
-Name=$ai_name
-Comment=Start $ai_name — your personal AI
-Exec=$VEX_HOME/start_vex.sh
-Path=$VEX_HOME
-Terminal=true
 Categories=Utility;
 DESKTOP
-echo "[ok] Created desktop launcher: $ai_name"
-
-# Symlink for CLI convenience
-mkdir -p "$HOME/.local/bin"
-ln -sf "$VEX_HOME/.venv/bin/vex" "$HOME/.local/bin/vex" 2>/dev/null || true
-if ! echo ":$PATH:" | grep -q ":$HOME/.local/bin:"; then
-    echo "[info] Add ~/.local/bin to your PATH to use the 'vex' command:"
-    echo "       echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+    echo "[ok] Desktop shortcut created"
 fi
 
 # ── Done ──────────────────────────────────────────────────────────────
 
-cat <<DONE
-
-================================================
-   ⚡  $ai_name is ready!
-
-   Start it from your app launcher, or run:
-     $VEX_HOME/start_vex.sh
-
-   Chat: http://localhost:8600
-
-   AI:    $ai_name $given
-   Home:  $VEX_HOME
-
-================================================
-
-DONE
-
-read -r -p "Start $ai_name now? (Y/n): " launch
-if [ "$launch" != "n" ] && [ "$launch" != "N" ]; then
-    exec "$VEX_HOME/start_vex.sh"
-fi
+echo ""
+echo "================================================"
+echo "  ⚡ $GIVEN is ready!"
+echo ""
+echo "  Start the daemon:  vex serve"
+echo "  Open the chat:     http://localhost:8600"
+echo "  Check status:      vex status"
+echo "  Talk via CLI:      vex ask -m \"hello $GIVEN\""
+echo ""
+echo "  Home: $VEX_HOME"
+echo "================================================"
+echo ""
+echo "Set DEEPSEEK_API_KEY for brain power (optional):"
+echo "  export DEEPSEEK_API_KEY=sk-your-key-here"
+echo ""
+echo "Start at login: add 'vex serve &' to your startup apps."

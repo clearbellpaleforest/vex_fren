@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, vex_fren]
+    paths:
+      - 'vex-cli/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    paths:
+      - 'vex-cli/**'
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: vex
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: vex.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        working-directory: vex-cli
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vex-${{ matrix.target }}
+          path: vex-cli/target/${{ matrix.target }}/release/${{ matrix.artifact }}
+
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build
+        run: cargo build --release
+        working-directory: vex-cli
+      - name: Smoke test
+        run: |
+          cargo build --release
+          # Verify binary works
+          ./target/release/vex --version
+          ./target/release/vex --help
+        working-directory: vex-cli
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+        working-directory: vex-cli

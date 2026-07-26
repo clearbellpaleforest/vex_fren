@@ -1,29 +1,32 @@
 # ⚡ Vex — Your Personal AI, Always On
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/status-operational-brightgreen)](https://github.com/clearbellpaleforest/vex_fren)
-[![Version](https://img.shields.io/badge/version-1.1.0-orange)](#)
+[![Version](https://img.shields.io/badge/version-2.0.0-orange)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.138%2B-009688)](https://fastapi.tiangolo.com/)
+[![Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://www.rust-lang.org/)
+[![Binary](https://img.shields.io/badge/binary-9MB%20static-blue)](#)
 
 <br>
 
-**Your AI. Your machine. Your rules.** Vex is a personal AI that lives on your computer — no cloud accounts, no subscriptions, no one else's server. It remembers who you are, picks up where you left off, and stays running in the background, ready whenever you need it. Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sovereign AI framework.
+**Your AI. Your machine. Your rules.** Vex is a personal AI that lives on your computer — no cloud accounts, no subscriptions, no one else's server. It remembers who you are, picks up where you left off, and stays running in the background, ready whenever you need it.
+
+Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sovereign AI framework.
 
 ---
 
 ## ✨ What It Does
 
-| 🤖 | |
+| | |
 |---|---|
 | 🧠 **Remembers across sessions** | Close your laptop, open it tomorrow — your AI still knows your name and what you were working on |
-| ⚡ **Runs quietly in the background** | Start once, stays alive. Chat always at `http://localhost:8600` |
-| 🎨 **You name it, you shape it** | The name, the personality, the vibe — all yours. The original is Vex, but this one's yours |
+| ⚡ **Runs quietly in the background** | Single static binary. Start once, stays alive |
+| 🎨 **You name it, you shape it** | The name, the personality, the vibe — all yours |
 | 🔌 **Plugs into Claude Code** | Select *Vexual Healing* at session start and your AI loads as your co-pilot |
 | 📖 **Keeps a diary** | Reflects on conversations, writes entries, builds a picture of who you are over time |
 | 🌐 **Talks to other instances** | Got it on your laptop and your desktop? They message each other |
 | 🔒 **100% local** | Everything runs on your machine. Your data never leaves your hard drive |
+| 🦀 **Zero dependencies** | Single 9MB Rust binary. No Python, no pip, no venv |
 
 ---
 
@@ -31,21 +34,21 @@
 
 ### 🪟 Windows
 
-**You need:** [Python 3.10+](https://www.python.org/downloads/) *(check "Add Python to PATH" during install)*
+Download `vex.exe` from the [latest release](https://github.com/clearbellpaleforest/vex_fren/releases/latest). Double-click to start.
 
-Open **PowerShell**, paste:
+Or, with Rust installed:
 
 ```powershell
-irm https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.ps1 | iex
+cargo install --git https://github.com/clearbellpaleforest/vex_fren vex-cli
 ```
 
-### 🐧 Linux *(Ubuntu, Fedora, Arch — all distros)*
-
-**You need:** Python 3.10+
+### 🐧 Linux
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
 ```
+
+Or download the binary directly from [releases](https://github.com/clearbellpaleforest/vex_fren/releases/latest).
 
 ### 🍎 macOS
 
@@ -53,17 +56,22 @@ curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/in
 curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
 ```
 
----
+### 🦀 From Source
 
-**That's it.** The installer asks your name, lets you name your AI, and sets everything up. Double-click the launcher on your desktop (or find it in your app menu on Linux), and your browser opens to the chat.
+```bash
+git clone https://github.com/clearbellpaleforest/vex_fren.git
+cd vex_fren/vex-cli
+cargo build --release
+cp target/release/vex ~/.local/bin/
+```
 
 ---
 
 ## 🧠 The Brain: DeepSeek API Key
 
-Your AI needs a brain to think. Vex and FEN use **DeepSeek** — a language model that costs about **$0.14 per million tokens** (a few dollars lasts months of personal use).
+Your AI needs a brain to think. Vex uses **DeepSeek** — a language model that costs about **$0.14 per million tokens** (a few dollars lasts months of personal use).
 
-**Without a key:** the mesh chat works, messages flow, the daemon runs — but no AI-generated replies.  
+**Without a key:** the daemon runs, messages flow — but `/ask` returns an echo fallback.  
 **With a key:** your AI thinks, responds, remembers, and converses.
 
 ### How to get one (2 minutes)
@@ -71,13 +79,9 @@ Your AI needs a brain to think. Vex and FEN use **DeepSeek** — a language mode
 1. Go to **[platform.deepseek.com](https://platform.deepseek.com)** and sign up
 2. Click **API Keys** → **Create new key** (it starts with `sk-`)
 3. Top up with **$2–5** — that's enough for months of personal use
-4. The installer asks for your key, or you can add it later:
+4. Set the key:
 
 ```bash
-# Windows (PowerShell)
-$env:DEEPSEEK_API_KEY = "sk-your-key-here"
-
-# Linux / macOS
 export DEEPSEEK_API_KEY="sk-your-key-here"
 ```
 
@@ -85,74 +89,68 @@ Or create a `.env` file in your Vex home folder with `DEEPSEEK_API_KEY=sk-your-k
 
 ---
 
-> 💡 On Windows, say **yes** when the installer asks about autostart to have your AI launch at login.
-
----
-
-## 📱 Use on Your Phone
-
-Vex's mesh GUI is a PWA — open it in your phone browser, tap **Install** or **Add to Home Screen**, and it works like a native app. No Android SDK. No App Store. No extra install.
-
-**To access Vex from anywhere**, expose it over [Tailscale](https://tailscale.com/):
-
-```bash
-tailscale serve --https=443 localhost:8600    # mesh GUI
-tailscale serve --https=8443 localhost:8520   # daemon API
-```
-
-Then open `https://<your-machine>.tailnet-name.ts.net` on your phone and install to home screen. Messages you send from your phone appear in the same mesh as your desktop sessions.
-
----
-
-```
-  You ──► http://localhost:8600 ──► Vex Daemon ──► Memory + Diary
-                                                    │
-  Claude Code ──► Vexual Healing ──► Seed + Self-Model
-```
-
----
-
 ## 💬 Using Your AI
 
 | How | Where |
 |-----|-------|
+| 🖥️ **Daemon** | `vex serve` — starts the background daemon |
 | 🌐 **Web Chat** | `http://localhost:8600` — clean message board, auto-refreshes |
 | 🤖 **Claude Code** | Select *Vexual Healing* at session start — your AI is your co-pilot |
-| 📊 **Dashboard** | `http://localhost:8520/status` — pulse, coherence, diary, sessions |
-| ⌨️ **CLI** | `vex status`, `vex diary`, `vex memory`, `vex self` |
+| ⌨️ **CLI** | `vex status`, `vex ask "hello"`, `vex diary "thought"`, `vex memory` |
 
 ---
 
-## 🛠️ CLI
+## 🛠️ CLI (22 commands)
 
 ```bash
+vex serve                     # start the daemon (background)
 vex status                    # pulse, coherence, uptime
+vex check                     # status + introspection + projects
+vex health                    # raw health JSON
 vex diary "had an idea..."    # write a thought
 vex dream                     # force a reflection cycle
 vex introspect                # run metacognition
 vex memory                    # recent session memories
+vex seed                      # identity seed
 vex self                      # capability scores
-vex peers                     # see your other instances
+vex ask "question"            # talk to your AI via DeepSeek
+vex projects                  # check git repos
+vex peers                     # list configured peers
 vex peer-add <name> <url> <token>  # connect to another instance
+vex peer-remove <name>        # remove a peer
+vex peer-ping <name>          # ping a peer
+vex export [path]             # export plug-and-play bundle
+vex import <file>             # import a bundle
+vex push <peer>               # push code updates to peer
+vex pull <peer> <path>        # pull file/dir from peer
+vex inbox                     # check new messages
+vex poke <peer>               # notify peer to check inbox
+vex monitor                   # watch inbox live (replaces vex_monitor.sh)
+vex watch                     # watch files for changes, auto-snapshot
 ```
 
 ---
 
-## 🔧 API
+## 🏗️ Architecture
 
-| Method | Path | Auth | What |
-|--------|------|------|------|
-| `GET` | `/health` | — | JSON health check |
-| `GET` | `/status` | — | HTML dashboard |
-| `GET` | `/seed` | — | Your AI's identity seed |
-| `GET` | `/self` | — | Capability model |
-| `GET` | `/memory/recent` | — | Recent memories |
-| `POST` | `/diary` | token | Write a diary entry |
-| `POST` | `/message/send` | token | Send a message |
-| `GET` | `/message/inbox` | token | Read your inbox |
-| `POST` | `/poke` | token | Process inbox now |
-| `GET` | `/export` | token | Export code bundle |
-| `POST` | `/import` | token | Import code bundle |
+```
+vex serve ──────────────────────────────────────────────
+  │  axum HTTP server (Rust)
+  │  port 8520 — identity, memory, messages, peers
+  │  port 8600 — mesh GUI (HTML chat)
+  │
+  ├─ vex.db (SQLite)
+  │   ├─ tick_log          heartbeat every 5 min
+  │   ├─ self_snapshots    hourly self-model snapshots
+  │   └─ messages          inter-instance mesh
+  │
+  ├─ vex_seed.txt          identity anchor (append-only)
+  ├─ vex_self_model.json   capability calibration
+  ├─ vex_diary.txt         event diary
+  └─ vex_memory/           episodic session journals
+```
+
+Single 9MB static binary. No Python. No venv. No pip.
 
 ---
 
@@ -165,27 +163,7 @@ vex peer-add <name> <url> <token>  # connect to another instance
 | `VEX_HOST` | `127.0.0.1` | Bind address |
 | `VEX_PORT` | `8520` | Daemon port |
 | `VEX_GUI_PORT` | `8600` | Chat port |
-
----
-
-## 🏗️ Architecture
-
-```
-vex_daemon/
-  daemon.py           FastAPI app, lifespan, all endpoints
-  auth.py             Bearer-token authentication
-  seed_kernel.py      Identity with append-only integrity
-  self_model.py       Capability model with confidence calibration
-  heartbeat.py        Background tick loop, diary, snapshots
-  metacognition.py    Coherence and drift introspection
-  memory_index.py     FTS5 full-history search
-  recall.py           Coverage-first memory retrieval
-  brain.py            Grounded reply engine (seed + memory)
-  vexcom.py           Internal messaging
-  peers.py            Peer registry and cross-instance federation
-  tools.py            Sandboxed filesystem tools
-  cli.py              Command-line client
-```
+| `DEEPSEEK_API_KEY` | — | Brain power for `/ask` |
 
 ---
 
@@ -193,31 +171,23 @@ vex_daemon/
 
 | Problem | Fix |
 |---------|-----|
-| "Python not found" | Install Python 3.10+ from [python.org](https://www.python.org/downloads/) |
-| "Running scripts is disabled" (Windows) | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| "Permission denied" (Linux/macOS) | `chmod +x install.sh && bash install.sh` |
-| Chat won't load | Go to `http://localhost:8600` manually |
-| Daemon won't start | Check `~/vex/logs/daemon.log` for errors |
+| "vex: command not found" | Add `~/.local/bin` to PATH |
+| Daemon won't start | Check `~/vex/vex.db` isn't locked by another process |
 | Port already in use | Set `VEX_PORT` / `VEX_GUI_PORT` env vars to different values |
 | AI seems forgetful | Make sure `~/vex/vex_seed.txt` exists — that's the memory anchor |
+| `vex serve` won't bind | The Python daemon may be running. `pkill -f vex_daemon` first |
 
 ---
 
 ## 🗑️ Uninstall
 
-Delete your AI's home folder:
-
 ```bash
-# Windows
-Remove-Item -Recurse $env:USERPROFILE\vex
-
-# Linux / macOS
 rm -rf ~/vex
-rm -f ~/.local/share/applications/vex.desktop
 rm -f ~/.local/bin/vex
+rm -f ~/.local/share/applications/vex.desktop
 ```
 
-Then delete the desktop shortcut. That's it — Vex doesn't install anything outside its home folder.
+Vex doesn't install anything outside its home folder and the `vex` binary.
 
 ---
 

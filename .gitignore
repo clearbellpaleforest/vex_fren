@@ -3,6 +3,8 @@
 __pycache__/
 *.pyc
 .DS_Store
+node_modules/
+package-lock.json
 
 # ── Python build artifacts ──
 build/
@@ -25,6 +27,7 @@ vex_fen_agent_key.txt
 
 # ── Binary transfer artifacts (build/regenerate locally, never commit) ──
 *.tar.gz
+bin/
 
 # ── Local instance config (real peer tokens / MCP config — never ship) ──
 vex_peers.json
@@ -44,8 +47,10 @@ vex_meta_state.json
 vex_memory/*.jsonl
 vex_workspace/vex_bus.jsonl
 vex_workspace/vex_group_chat_log.jsonl
+vex_workspace/vex_sessions.jsonl
 vex_workspace/john-update-email.txt
 vex_workspace/ledger.json
+vex_workspace/hannah-optimization-note-2026-07-10.md
 vex_workspace/tasks/
 vex_workspace/projects/
 vex_workspace/archive/
