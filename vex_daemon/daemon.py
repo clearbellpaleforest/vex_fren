@@ -41,6 +41,7 @@ import mcp_client
 import peers
 import brain
 from routers.tasks import router as tasks_router
+from routers.task_analysis import run_analysis
 
 DB_PATH = str(_DB_PATH)
 SELF_SNAPSHOTS_DIR = VEX_HOME
@@ -312,7 +313,7 @@ async def lifespan(app: FastAPI):
 
     # Launch heartbeat
     async def dream_callback(coherence, history):
-        """Called by heartbeat during dream cycles. Introspect + check projects."""
+        """Called by heartbeat during dream cycles. Introspect + check projects + analyze tasks."""
         result = introspect(coherence=coherence, coherence_history=history)
 
         # Deep dreams (24h+ idle): also check on projects
@@ -327,6 +328,14 @@ async def lifespan(app: FastAPI):
                         f"\n\nUncommitted work: {names}. "
                         f"({len(dirty)} of {len(projects['projects'])} repos dirty)"
                     )
+        except Exception:
+            pass
+
+        # Task analysis — run every hourly dream cycle
+        try:
+            analysis = await run_analysis(DB_PATH)
+            if analysis.get("insights", 0) > 0:
+                result["insight"] += f"\n\nTask analysis: {analysis.get('summary', '')}"
         except Exception:
             pass
 

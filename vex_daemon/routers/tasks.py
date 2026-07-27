@@ -709,6 +709,19 @@ async def acknowledge_insight(insight_id: int, request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
+@router.post("/insights/analyze")
+async def trigger_analysis(request: Request):
+    """Manually trigger a task analysis cycle."""
+    if (err := check_auth(request)):
+        return err
+    try:
+        from routers.task_analysis import run_analysis
+        result = await run_analysis(DB_PATH)
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 # ── Cross-Agent Linking ───────────────────────────────────────────
 
 @router.get("/link/external")
