@@ -416,6 +416,393 @@ def cmd_poke_peer(peer_name: str) -> None:
         sys.exit(1)
 
 
+# ── Task management ───────────────────────────────────────────────
+
+STATUS_ICONS = {"todo": "☐", "in_progress": "◉", "blocked": "⊘", "done": "✓", "cancelled": "✕"}
+
+
+def cmd_tasks(args: list[str]) -> None:
+    """Task management: list, add, done, block, projects, stats, learn."""
+    if not args:
+        # Default: list open tasks
+        _tasks_list("todo,in_progress,blocked")
+        return
+
+    sub = args[0].lower()
+
+    if sub == "add":
+        title = " ".join(args[1:])
+        if not title.strip():
+            print("vex tasks add <title> [--project <id>] [--priority <p>]")
+            sys.exit(1)
+        # Parse flags
+        project_id = None
+        priority = "medium"
+        remaining = []
+        skip = False
+        for i, a in enumerate(args[1:]):
+            if skip:
+                skip = False
+                continue
+            if a == "--project" and i + 2 < len(args):
+                project_id = int(args[i + 2])
+                skip = True
+            elif a == "--priority" and i + 2 < len(args):
+                priority = args[i + 2]
+                skip = True
+            else:
+                remaining.append(a)
+        _tasks_add(" ".join(remaining), project_id, priority)
+
+    elif sub == "done":
+        if len(args) < 2:
+            print("vex tasks done <id> [--note <text>]")
+            sys.exit(1)
+        task_id = int(args[1])
+        note = ""
+        if "--note" in args:
+            idx = args.index("--note")
+            if idx + 1 < len(args):
+                note = " ".join(args[idx + 1:])
+        _tasks_done(task_id, note)
+
+    elif sub == "block":
+        if len(args) < 2:
+            print("vex tasks block <id> <reason>")
+            sys.exit(1)
+        task_id = int(args[1])
+        reason = " ".join(args[2:]) if len(args) > 2 else ""
+        _tasks_block(task_id, reason)
+
+    elif sub == "unblock":
+        if len(args) < 2:
+            print("vex tasks unblock <id>")
+            sys.exit(1)
+        _tasks_unblock(int(args[1]))
+
+    elif sub in ("projects", "proj"):
+        _tasks_projects()
+
+    elif sub == "stats":
+        _tasks_stats()
+
+    elif sub == "learn":
+        _tasks_learn()
+
+    elif sub in ("list", "ls"):
+        status = args[1] if len(args) > 1 else "todo,in_progress,blocked"
+        _tasks_list(status)
+
+    elif sub in ("show", "get", "info"):
+        if len(args) < 2:
+            print("vex tasks show <id>")
+            sys.exit(1)
+        _tasks_show(int(args[1]))
+
+    elif sub == "tree":
+        if len(args) < 2:
+            print("vex tasks tree <id>")
+            sys.exit(1)
+        _tasks_tree(int(args[1]))
+
+    else:
+        # Assume it's a status filter
+        _tasks_list(sub)
+
+
+def _tasks_list(status: str = "todo,in_progress,blocked") -> None:
+    result = _get(f"/tasks?status={status}&limit=50")
+    if isinstance(result, list):
+        if not result:
+            print("No tasks.")
+            return
+        for t in result:
+            icon = STATUS_ICONS.get(t.get("status", ""), "?")
+            indent = "  " * t.get("depth", 0)
+            proj = f" [{t.get('project_name', '')}]" if t.get("project_name") else ""
+            print(f"  {indent}{icon} #{t['id']} [{t.get('priority', '?'):7s}] {t['title']}{proj}")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_add(title: str, project_id: int | None = None, priority: str = "medium") -> None:
+    body = {"title": title, "priority": priority}
+    if project_id:
+        body["project_id"] = project_id
+    result = _post("/tasks", body)
+    if result.get("ok"):
+        print(f"Created #{result['task']['id']}: {result['task']['title']}")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_done(task_id: int, note: str = "") -> None:
+    body = {"note": note} if note else {}
+    result = _post(f"/tasks/{task_id}/done", body)
+    if result.get("ok"):
+        print(f"Task #{task_id} marked done.")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_block(task_id: int, reason: str = "") -> None:
+    body = {"reason": reason} if reason else {}
+    result = _post(f"/tasks/{task_id}/block", body)
+    if result.get("ok"):
+        print(f"Task #{task_id} blocked. {reason}")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_unblock(task_id: int) -> None:
+    result = _post(f"/tasks/{task_id}/unblock", {})
+    if result.get("ok"):
+        print(f"Task #{task_id} unblocked. Status: {result.get('task', {}).get('status', '?')}")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_projects() -> None:
+    result = _get("/tasks/projects")
+    if isinstance(result, list):
+        if not result:
+            print("No projects.")
+            return
+        for p in result:
+            print(f"  {p['name']:30s} {p.get('task_count', 0)} tasks "
+                  f"({p.get('completed_count', 0)} done) [{p.get('status', '?')}]")
+    else:
+        print(f"Error: {result.get('error')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_stats() -> None:
+    result = _get("/tasks/stats")
+    if isinstance(result, dict) and result.get("tasks"):
+        t = result["tasks"]
+        v = result.get("velocity", {})
+        b = result.get("bottlenecks", {})
+        print(f"Tasks:    {t['total']} total — "
+              f"{t['todo']} todo, {t['in_progress']} in progress, "
+              f"{t['blocked']} blocked, {t['done']} done")
+        if v:
+            print(f"Velocity: {v.get('created_per_week', 0)} created/wk, "
+                  f"{v.get('completed_per_week', 0)} completed/wk "
+                  f"(last {v.get('created_period', 0)}/{v.get('completed_period', 0)})")
+        if b:
+            print(f"Alerts:   {b.get('blocked', 0)} blocked, {b.get('stale', 0)} stale (>14d)")
+    else:
+        print(f"Error: {result.get('error', 'unknown')}", file=sys.stderr)
+
+
+def _tasks_learn() -> None:
+    """Trigger a learning analysis cycle."""
+    result = _post("/introspect", {})  # Reuse introspect for now
+    print("Analysis cycle triggered.")
+    print(f"  {result.get('insight', 'No insights yet.')}")
+
+
+def _tasks_show(task_id: int) -> None:
+    result = _get(f"/tasks/{task_id}")
+    if isinstance(result, dict) and result.get("id"):
+        icon = STATUS_ICONS.get(result.get("status", ""), "?")
+        print(f"{icon} #{result['id']} [{result.get('priority', '?')}] {result['title']}")
+        if result.get("description"):
+            print(f"  {result['description']}")
+        print(f"  Status: {result.get('status', '?')}  "
+              f"Progress: {result.get('progress', 0) * 100:.0f}%  "
+              f"Assigned: {result.get('assigned_to', 'any')}")
+        if result.get("project_name"):
+            print(f"  Project: {result['project_name']}")
+        if result.get("children"):
+            print(f"  Subtasks: {len(result['children'])}")
+            for c in result["children"]:
+                ci = STATUS_ICONS.get(c.get("status", ""), "?")
+                print(f"    {ci} #{c['id']} {c['title']}")
+        if result.get("history"):
+            print(f"  History ({len(result['history'])} changes):")
+            for h in result["history"][:5]:
+                print(f"    {h.get('changed_at', '')[:16]}  {h.get('field', '')}: "
+                      f"{h.get('old_value', '')} → {h.get('new_value', '')}")
+    else:
+        print(f"Error: {result.get('error', 'not found')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _tasks_tree(task_id: int) -> None:
+    result = _get(f"/tasks/{task_id}/tree")
+    if isinstance(result, dict) and result.get("id"):
+        _print_tree(result, 0)
+    else:
+        print(f"Error: {result.get('error', 'not found')}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _print_tree(task: dict, depth: int) -> None:
+    icon = STATUS_ICONS.get(task.get("status", ""), "?")
+    indent = "  " * depth
+    print(f"{indent}{icon} #{task['id']} [{task.get('priority', '?')}] {task['title']}")
+    for child in task.get("children", []):
+        _print_tree(child, depth + 1)
+
+
+# ── Cross-instance sync ──────────────────────────────────────────
+
+def cmd_sync() -> None:
+    """Push code to all configured peers so they stay in sync."""
+    import json as _json
+
+    # Get current version
+    version_data = _get("/sync/version")
+    current_version = version_data.get("version", "1.0.0")
+
+    # Bump version
+    parts = current_version.split(".")
+    parts[-1] = str(int(parts[-1]) + 1)
+    new_version = ".".join(parts)
+
+    peers_path = _VEX_HOME / "vex_peers.json"
+    try:
+        peers_cfg = _json.loads(peers_path.read_text())
+    except (OSError, _json.JSONDecodeError):
+        print("vex: no peers configured — nothing to sync to", file=sys.stderr)
+        sys.exit(1)
+
+    peers_list = peers_cfg.get("peers", {})
+    if not peers_list:
+        print("No peers configured. Add one with: vex peer-add <name> <url> <token>")
+        return
+
+    # Export bundle from local daemon
+    print(f"Exporting bundle (v{new_version})...")
+    req = urllib.request.Request(
+        f"{DAEMON}/export",
+        headers=_auth_headers(),
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            bundle = r.read()
+    except urllib.error.URLError as e:
+        print(f"vex: local daemon not reachable ({e.reason})", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"  Bundle: {len(bundle) / 1024:.0f} KB")
+
+    # Push to each peer
+    for name, peer in peers_list.items():
+        print(f"Syncing to {name} ({peer['url']})...")
+        req = urllib.request.Request(
+            f"{peer['url']}/sync/update",
+            data=bundle,
+            headers={
+                "Content-Type": "application/gzip",
+                "Authorization": f"Bearer {peer['token']}",
+                "X-Vex-Version": new_version,
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                result = _json.loads(r.read().decode())
+                if result.get("ok"):
+                    print(f"  ✓ {name} updated — restarting daemon")
+                else:
+                    print(f"  ✗ {name}: {result.get('error', 'unknown')}")
+        except Exception as e:
+            print(f"  ✗ {name} unreachable: {e}")
+
+    # Bump local version
+    sync_path = _VEX_HOME / ".sync_version"
+    sync_path.write_text(_json.dumps({
+        "version": new_version,
+        "timestamp": __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat(),
+        "instance": __import__('socket').gethostname(),
+    }, indent=2))
+
+    print(f"\nSynced v{new_version} to {len(peers_list)} peer(s).")
+
+
+def cmd_update(peer_name: str = "") -> None:
+    """Pull latest code from a peer or all peers."""
+    import json as _json
+
+    peers_path = _VEX_HOME / "vex_peers.json"
+    try:
+        peers_cfg = _json.loads(peers_path.read_text())
+    except (OSError, _json.JSONDecodeError):
+        print("vex: no peers configured", file=sys.stderr)
+        sys.exit(1)
+
+    peers_to_check = {}
+    if peer_name:
+        if peer_name not in peers_cfg.get("peers", {}):
+            print(f"vex: peer '{peer_name}' not found", file=sys.stderr)
+            sys.exit(1)
+        peers_to_check[peer_name] = peers_cfg["peers"][peer_name]
+    else:
+        peers_to_check = peers_cfg.get("peers", {})
+
+    if not peers_to_check:
+        print("No peers to check.")
+        return
+
+    # Check local version
+    local_version = _get("/sync/version").get("version", "1.0.0")
+    print(f"Local:  v{local_version} ({_VEX_HOME})")
+
+    updated = False
+    for name, peer in peers_to_check.items():
+        try:
+            req = urllib.request.Request(
+                f"{peer['url']}/sync/version",
+                headers={"Authorization": f"Bearer {peer['token']}"},
+            )
+            with urllib.request.urlopen(req, timeout=5) as r:
+                peer_version = _json.loads(r.read().decode())
+            pv = peer_version.get("version", "1.0.0")
+            print(f"  {name}: v{pv} ", end="")
+            if pv != local_version:
+                print("← newer — pulling...")
+                # Pull from peer
+                req2 = urllib.request.Request(
+                    f"{peer['url']}/export",
+                    headers={"Authorization": f"Bearer {peer['token']}"},
+                )
+                with urllib.request.urlopen(req2, timeout=30) as r2:
+                    bundle = r2.read()
+
+                # Import locally via daemon
+                req3 = urllib.request.Request(
+                    f"{DAEMON}/sync/update",
+                    data=bundle,
+                    headers={
+                        "Content-Type": "application/gzip",
+                        "Authorization": f"Bearer {_token()}",
+                        "X-Vex-Version": pv,
+                    },
+                    method="POST",
+                )
+                with urllib.request.urlopen(req3, timeout=30) as r3:
+                    result = _json.loads(r3.read().decode())
+                    if result.get("ok"):
+                        print(f"    ✓ Updated to v{pv}. Daemon restarting...")
+                        updated = True
+                    else:
+                        print(f"    ✗ {result.get('error', 'unknown')}")
+            else:
+                print("✓ up to date")
+        except Exception as e:
+            print(f"  {name}: unreachable ({e})")
+
+    if not updated:
+        print("\nAlready up to date.")
+
+
 def cmd_push(peer_name: str) -> None:
     """Push code updates to a peer Vex."""
     import json as _json
@@ -557,7 +944,19 @@ USAGE = """vex — talk to the Vex Daemon
   vex pull <peer> <path>  Pull a file/directory from a peer
   vex push <peer>         Push code updates to a peer Vex
   vex inbox               Check and display new messages
-  vex poke <peer>         Notify a peer to check its inbox"""
+  vex poke <peer>         Notify a peer to check its inbox
+  vex tasks               List open tasks
+  vex tasks add <title>   Create a task
+  vex tasks done <id>     Mark task complete
+  vex tasks block <id> <reason>  Block a task
+  vex tasks unblock <id>  Unblock a task
+  vex tasks show <id>     Show task detail + history
+  vex tasks tree <id>     Show full task hierarchy
+  vex tasks projects      List projects with task counts
+  vex tasks stats         Show task statistics
+  vex tasks learn         Force analysis cycle
+  vex sync                Push code to all peers (keep instances in sync)
+  vex update [peer]       Pull latest code from peer(s)"""
 
 
 def main() -> None:
@@ -617,6 +1016,12 @@ def main() -> None:
         cmd_inbox()
     elif cmd == "poke":
         cmd_poke_peer(sys.argv[2] if len(sys.argv) > 2 else "")
+    elif cmd == "tasks":
+        cmd_tasks(sys.argv[2:])
+    elif cmd == "sync":
+        cmd_sync()
+    elif cmd == "update":
+        cmd_update(sys.argv[2] if len(sys.argv) > 2 else "")
     elif cmd in ("help", "-h", "--help"):
         print(USAGE)
     else:

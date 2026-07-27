@@ -40,6 +40,7 @@ import tools
 import mcp_client
 import peers
 import brain
+from routers.tasks import router as tasks_router
 
 DB_PATH = str(_DB_PATH)
 SELF_SNAPSHOTS_DIR = VEX_HOME
@@ -145,6 +146,121 @@ async def init_db() -> None:
                 read INTEGER DEFAULT 0
             )
         """)
+        # ── Task management tables ──
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                priority TEXT DEFAULT 'medium',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                source_agent TEXT DEFAULT 'vex',
+                source_session TEXT,
+                tags TEXT DEFAULT '[]',
+                meta TEXT DEFAULT '{}'
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                parent_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+                title TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                status TEXT DEFAULT 'todo',
+                priority TEXT DEFAULT 'medium',
+                progress REAL DEFAULT 0.0,
+                source_agent TEXT DEFAULT 'vex',
+                source_session TEXT,
+                external_ref TEXT,
+                external_system TEXT,
+                assigned_to TEXT DEFAULT 'any',
+                tags TEXT DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT,
+                deadline TEXT,
+                estimated_hours REAL,
+                actual_hours REAL,
+                meta TEXT DEFAULT '{}'
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS skills (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                description TEXT DEFAULT '',
+                category TEXT DEFAULT 'general',
+                level TEXT DEFAULT 'unknown',
+                confidence REAL DEFAULT 0.0,
+                observations INTEGER DEFAULT 0,
+                evidence_count INTEGER DEFAULT 0,
+                first_seen TEXT,
+                last_demonstrated TEXT,
+                source_agent TEXT DEFAULT 'vex',
+                meta TEXT DEFAULT '{}'
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS task_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+                changed_at TEXT NOT NULL,
+                field TEXT NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                source_agent TEXT DEFAULT 'vex',
+                source_session TEXT,
+                note TEXT DEFAULT ''
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                generated_at TEXT NOT NULL,
+                insight_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL,
+                confidence REAL DEFAULT 0.5,
+                evidence_tasks TEXT DEFAULT '[]',
+                evidence_projects TEXT DEFAULT '[]',
+                acknowledged INTEGER DEFAULT 0,
+                actionable INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS velocity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_at TEXT NOT NULL,
+                period_days INTEGER NOT NULL,
+                tasks_created INTEGER DEFAULT 0,
+                tasks_completed INTEGER DEFAULT 0,
+                avg_completion_hours REAL,
+                median_completion_hours REAL,
+                blocked_count INTEGER DEFAULT 0,
+                stale_count INTEGER DEFAULT 0,
+                active_projects INTEGER DEFAULT 0
+            )
+        """)
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_history_task ON task_history(task_id)"
+        )
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_insights_type ON insights(insight_type)"
+        )
         await db.commit()
 
 
@@ -246,6 +362,8 @@ app = FastAPI(
     version=VERSION,
     lifespan=lifespan,
 )
+
+app.include_router(tasks_router)
 
 # ── Endpoints ──────────────────────────────────────────────────
 
@@ -1163,6 +1281,98 @@ async def get_bus(n: int = 50):
         return JSONResponse(parsed)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── Sync / version tracking ────────────────────────────────────
+
+SYNC_VERSION_PATH = VEX_HOME / ".sync_version"
+
+
+def _read_sync_version() -> dict:
+    """Read the current sync version, creating it if needed."""
+    if not SYNC_VERSION_PATH.exists():
+        _write_sync_version("1.0.0")
+    try:
+        data = json.loads(SYNC_VERSION_PATH.read_text())
+        return data
+    except Exception:
+        return {"version": "1.0.0", "timestamp": "", "instance": VEX_INSTANCE}
+
+
+def _write_sync_version(version: str) -> None:
+    """Bump the sync version after code changes."""
+    data = {
+        "version": version,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "instance": VEX_INSTANCE,
+    }
+    SYNC_VERSION_PATH.write_text(json.dumps(data, indent=2))
+
+
+@app.get("/sync/version")
+async def get_sync_version():
+    """Return current version for peer comparison."""
+    return JSONResponse(_read_sync_version())
+
+
+@app.post("/sync/update")
+async def post_sync_update(request: Request):
+    """Receive a code update from a peer and restart."""
+    if (err := check_auth(request)):
+        return err
+
+    import tarfile
+    import io
+    import shutil
+
+    raw = await request.body()
+    if len(raw) > 50 * 1024 * 1024:
+        return JSONResponse(
+            {"ok": False, "error": "bundle too large (max 50 MB)"}, status_code=413
+        )
+
+    IDENTITY_FILES = {"vex_seed.txt", "vex_self_model.json", "vex_diary.txt",
+                      "vex_peers.json", "vex_mcp_config.json", ".vex_token",
+                      "vex.db", ".sync_version"}
+
+    try:
+        buf = io.BytesIO(raw)
+        with tarfile.open(fileobj=buf, mode="r:gz") as tar:
+            for member in tar.getmembers():
+                if member.name in IDENTITY_FILES or member.name.startswith("vex_memory/"):
+                    continue
+                target_path = VEX_HOME / member.name
+                if member.isdir():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    with tar.extractfile(member) as src:
+                        target_path.write_bytes(src.read())
+
+        # Bump version after successful import
+        new_version = request.headers.get("X-Vex-Version", "1.0.1")
+        _write_sync_version(new_version)
+
+        # Restart ourselves
+        import signal
+        import os as _os
+
+        async def _restart():
+            await asyncio.sleep(1)
+            _os.kill(_os.getpid(), signal.SIGTERM)
+
+        asyncio.create_task(_restart())
+
+        return JSONResponse({
+            "ok": True,
+            "imported": True,
+            "restarting": True,
+            "note": "Code updated. Daemon restarting.",
+        })
+    except tarfile.TarError as e:
+        return JSONResponse({"ok": False, "error": f"Invalid bundle: {e}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
 # ── Entry point ────────────────────────────────────────────────
