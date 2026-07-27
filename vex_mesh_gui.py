@@ -439,7 +439,7 @@ function install(){
     installPrompt.prompt();
     installPrompt=null;
   } else {
-    alert('Use your browser menu:\n\nChrome: ⋮ → Add to Home screen\nSafari: Share → Add to Home Screen\n\nOr open this page on localhost for one-tap install.');
+    alert('Use your browser menu:  Chrome: menu -> Add to Home screen  |  Safari: Share -> Add to Home Screen  |  Or open on localhost for one-tap install.');
   }
   document.getElementById('install-banner').classList.remove('show');
 }
