@@ -185,7 +185,6 @@ PAGE = """\
     display:flex;flex-direction:column;
     overflow:hidden;
     -webkit-tap-highlight-color:transparent;
-    -webkit-user-select:none;user-select:none;
   }
 
   /* ── Header ─────────────────────────────────────────────── */
@@ -208,6 +207,7 @@ PAGE = """\
     display:flex;flex-direction:column;gap:8px;
     -webkit-overflow-scrolling:touch;
     scroll-behavior:smooth;
+    user-select:text;-webkit-user-select:text;
   }
   .row{display:flex;flex-direction:column;max-width:88%}
   .row.barrow,.row.deux{align-self:flex-end;align-items:flex-end}
@@ -424,9 +424,23 @@ window.addEventListener('beforeinstallprompt',e=>{
   e.preventDefault();
   installPrompt=e;
   document.getElementById('install-banner').classList.add('show');
+  document.getElementById('install-banner').textContent='📱 Tap to install Vex on your phone';
 });
+// Always show the banner — on HTTP the event won't fire, but user can install manually
+setTimeout(()=>{
+  const banner=document.getElementById('install-banner');
+  if(!installPrompt && !banner.classList.contains('show')){
+    banner.classList.add('show');
+    banner.textContent='📱 Add to home screen: use browser menu → Install';
+  }
+},3000);
 function install(){
-  if(installPrompt){ installPrompt.prompt(); installPrompt=null; }
+  if(installPrompt){
+    installPrompt.prompt();
+    installPrompt=null;
+  } else {
+    alert('Use your browser menu:\n\nChrome: ⋮ → Add to Home screen\nSafari: Share → Add to Home Screen\n\nOr open this page on localhost for one-tap install.');
+  }
   document.getElementById('install-banner').classList.remove('show');
 }
 
