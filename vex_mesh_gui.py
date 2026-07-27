@@ -278,6 +278,51 @@ PAGE = """\
     #compose textarea{font-size:16px;padding:8px 14px}
   }
 
+  /* ── Tabs ────────────────────────────────────────────────── */
+  #tabs{display:flex;gap:4px}
+  .tab{
+    background:transparent;border:1px solid var(--line);color:var(--muted);
+    padding:4px 10px;border-radius:6px;font-size:12px;cursor:pointer;
+    transition:all .15s;
+  }
+  .tab.active{background:var(--accent);color:#0b0e14;border-color:var(--accent)}
+  .tab:hover:not(.active){border-color:var(--accent);color:var(--txt)}
+
+  /* ── Fleet panels ─────────────────────────────────────────── */
+  #instances{flex:1;overflow-y:auto;padding:12px}
+  #fleet-panels{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fpanel{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:12px;overflow-y:auto
+  }
+  .fpanel h3{font-size:13px;margin:0 0 8px;color:var(--accent)}
+  .fleet-row{
+    display:flex;align-items:center;gap:8px;padding:6px 0;
+    border-bottom:1px solid var(--line);font-size:12px
+  }
+  .fleet-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+  .fleet-dot.online{background:#22c55e}
+  .fleet-dot.offline{background:#ef4444}
+  .fleet-info{flex:1;min-width:0}
+  .fleet-info .name{font-weight:600;color:var(--txt)}
+  .fleet-info .detail{color:var(--muted);font-size:11px}
+  .skill-bar{height:4px;background:var(--line);border-radius:2px;margin:2px 0 6px}
+  .skill-bar-fill{height:100%;border-radius:2px;background:var(--accent)}
+  .task-row{
+    display:flex;align-items:center;gap:6px;padding:4px 0;
+    font-size:11px;border-bottom:1px solid rgba(255,255,255,.03)
+  }
+  .task-row .prio{font-size:10px;padding:1px 4px;border-radius:3px}
+  .prio.critical{background:rgba(239,68,68,.2);color:#ef4444}
+  .prio.high{background:rgba(245,167,66,.2);color:#f5a742}
+  .prio.medium{background:rgba(56,189,248,.2);color:#38bdf8}
+  .prio.low{background:rgba(148,163,184,.2);color:#94a3b8}
+  .tl-entry{font-size:11px;padding:4px 0;border-bottom:1px solid var(--line);color:var(--muted)}
+  .tl-entry .sn{font-weight:600;color:var(--txt)}
+  @media(max-width:600px){
+    #fleet-panels{grid-template-columns:1fr}
+  }
+
   /* ── Install prompt ──────────────────────────────────────── */
   #install-banner{
     display:none;padding:10px 16px;background:rgba(245,167,66,.12);
@@ -292,6 +337,10 @@ PAGE = """\
 <header>
   <span class="dot" id="dot"></span>
   <h1>Vex Mesh</h1>
+  <nav id="tabs">
+    <button class="tab active" onclick="switchTab('chat')">Chat</button>
+    <button class="tab" onclick="switchTab('instances')">Instances</button>
+  </nav>
   <span class="meta" id="meta">connecting…</span>
 </header>
 
@@ -300,6 +349,27 @@ PAGE = """\
 </div>
 
 <div id="log"><div class="empty">waiting for messages…</div></div>
+
+<div id="instances" style="display:none">
+  <div id="fleet-panels">
+    <div class="fpanel" id="panel-fleet">
+      <h3>🖥 Fleet</h3>
+      <div id="fleet-list"></div>
+    </div>
+    <div class="fpanel" id="panel-tasks">
+      <h3>📋 Task Board</h3>
+      <div id="task-board"></div>
+    </div>
+    <div class="fpanel" id="panel-skills">
+      <h3>🧠 Skills</h3>
+      <div id="skills-view"></div>
+    </div>
+    <div class="fpanel" id="panel-timeline">
+      <h3>📜 Timeline</h3>
+      <div id="timeline-view"></div>
+    </div>
+  </div>
+</div>
 
 <div id="compose">
   <span class="ident" id="ident">You</span>
@@ -456,6 +526,95 @@ if('serviceWorker' in navigator){
 
 // ── Boot ─────────────────────────────────────────────────────
 tick(); setInterval(tick, 2000);
+
+// ── Tab switching ────────────────────────────────────────────
+let currentTab='chat';
+function switchTab(tab){
+  currentTab=tab;
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.textContent.toLowerCase().includes(tab)));
+  document.getElementById('log').style.display=tab==='chat'?'flex':'none';
+  document.getElementById('compose').style.display=tab==='chat'?'flex':'none';
+  document.getElementById('instances').style.display=tab==='instances'?'block':'none';
+  if(tab==='instances'){fetchFleet(); fleetInterval=setInterval(fetchFleet,5000);}
+  else{clearInterval(fleetInterval);}
+}
+let fleetInterval=null;
+
+// ── Fleet rendering ──────────────────────────────────────────
+async function fetchFleet(){
+  try{
+    const r=await fetch('/fleet-data');
+    const f=await r.json();
+    renderFleet(f);
+  }catch(e){}
+}
+function renderFleet(f){
+  // Fleet panel
+  let html='';
+  for(const i of f.instances||[]){
+    const dot=i.status==='online'?'online':'offline';
+    const uptime=i.uptime_s>3600?`${(i.uptime_s/3600).toFixed(1)}h`:i.uptime_s>60?`${(i.uptime_s/60).toFixed(0)}m`:`${i.uptime_s.toFixed(0)}s`;
+    html+=`<div class="fleet-row">
+      <div class="fleet-dot ${dot}"></div>
+      <div class="fleet-info">
+        <div class="name">${esc(i.name)} ${i.is_local?'(you)':''}</div>
+        <div class="detail">${i.url} · uptime ${uptime} · coherence ${i.coherence.toFixed(3)} · v${i.version||'?'}</div>
+        <div class="detail">${(i.skills||[]).length} skills · ${i.tasks?.total||0} tasks (${i.tasks?.done||0} done)</div>
+      </div>
+    </div>`;
+  }
+  document.getElementById('fleet-list').innerHTML=html||'<div class="empty">no instances</div>';
+
+  // Task board
+  let thtml='';
+  const tasks=f.task_board||[];
+  if(!tasks.length) thtml='<div class="empty">no open tasks</div>';
+  else {
+    for(const t of tasks){
+      const icon={todo:'☐',in_progress:'◉',blocked:'⊘',done:'✓'}[t.status]||'?';
+      thtml+=`<div class="task-row">
+        <span class="prio ${t.priority}">${t.priority}</span>
+        <span>${icon} ${esc(t.title).substring(0,50)}</span>
+        <span style="color:var(--muted);margin-left:auto">${t.instance}</span>
+      </div>`;
+    }
+  }
+  document.getElementById('task-board').innerHTML=thtml;
+
+  // Skills panel
+  let shtml='';
+  const shared=f.shared_skills||{};
+  const skills=Object.entries(shared).sort((a,b)=>b[1].max_skill-a[1].max_skill);
+  if(!skills.length) shtml='<div class="empty">no skills tracked</div>';
+  else {
+    for(const [domain,data] of skills){
+      const pct=(data.max_skill*100).toFixed(0);
+      shtml+=`<div style="margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;font-size:11px">
+          <span style="color:var(--txt)">${esc(domain)}</span>
+          <span style="color:var(--muted)">${pct}% · ${data.instances.length} instance${data.instances.length>1?'s':''} · ${data.total_obs} obs</span>
+        </div>
+        <div class="skill-bar"><div class="skill-bar-fill" style="width:${pct}%"></div></div>
+      </div>`;
+    }
+  }
+  document.getElementById('skills-view').innerHTML=shtml;
+
+  // Timeline
+  let tlhtml='';
+  const tl=f.timeline||[];
+  if(!tl.length) tlhtml='<div class="empty">no sessions</div>';
+  else {
+    for(const s of tl.slice(0,20)){
+      const dt=(s.started||'').substring(0,16).replace('T',' ');
+      tlhtml+=`<div class="tl-entry">
+        <span class="sn">${esc(s.session)}</span> (#${s.number}) on ${esc(s.instance)}
+        <span style="float:right">${dt}</span>
+      </div>`;
+    }
+  }
+  document.getElementById('timeline-view').innerHTML=tlhtml;
+}
 </script>
 </body></html>"""
 
@@ -475,6 +634,13 @@ class H(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/messages":
             self._send(json.dumps(fetch_messages()).encode(), "application/json")
+        elif path == "/fleet-data":
+            try:
+                req = urllib.request.Request(f"{DAEMON_URL}/fleet")
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    self._send(r.read(), "application/json")
+            except Exception:
+                self._send(json.dumps({"error": "daemon unreachable"}).encode(), "application/json", 502)
         elif path == "/manifest.json":
             self._send(MANIFEST, "application/json")
         elif path == "/sw.js":

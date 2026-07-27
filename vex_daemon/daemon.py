@@ -469,7 +469,7 @@ async def post_diary(request: Request):
 
 @app.post("/self/update")
 async def post_self_update(request: Request):
-    """Update self-model: apply a capability delta."""
+    """Update self-model: apply a capability delta. Broadcasts to peers."""
     if (err := check_auth(request)):
         return err
     try:
@@ -496,9 +496,82 @@ async def post_self_update(request: Request):
             .get("estimated_skill", 0.5)
         )
 
+        # Broadcast to peers so all instances learn together
+        _broadcast_skill_update(domain, delta, evidence)
+
         return JSONResponse({
             "ok": True,
             "domain": domain,
+            "new_skill": new_skill,
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+def _broadcast_skill_update(domain: str, delta: float, evidence: str):
+    """Fire-and-forget: push a skill update to all configured peers."""
+    import json as _json
+    import urllib.request as _ureq
+
+    peer_config = peers.load_peers()
+    for peer_name, peer_data in peer_config.get("peers", {}).items():
+        try:
+            payload = _json.dumps({
+                "domain": domain,
+                "delta": delta,
+                "evidence": f"[via {VEX_INSTANCE}] {evidence}",
+                "source_instance": VEX_INSTANCE,
+            }).encode()
+            req = _ureq.Request(
+                f"{peer_data['url']}/self/peer-update",
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {peer_data.get('token', '')}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            # Fire-and-forget — don't block the response
+            import threading
+            threading.Thread(target=lambda: _ureq.urlopen(req, timeout=5), daemon=True).start()
+        except Exception:
+            pass  # Peer unreachable — they'll catch up on next sync
+
+
+@app.post("/self/peer-update")
+async def post_self_peer_update(request: Request):
+    """Receive a skill update from a peer instance. Lower alpha — trust ourselves more."""
+    if (err := check_auth(request)):
+        return err
+    try:
+        body = await request.json()
+        domain = body.get("domain", "")
+        delta = body.get("delta", 0.0)
+        evidence = body.get("evidence", "from peer")
+        source = body.get("source_instance", "unknown")
+
+        if not domain:
+            return JSONResponse({"ok": False, "error": "domain is required"}, status_code=400)
+
+        # Apply with reduced weight — peer observations are valuable but secondary
+        delta = max(-1.0, min(1.0, float(delta))) * 0.5
+
+        model = load_model()
+        model = apply_delta(model, domain, delta, f"[peer:{source}] {evidence}")
+        save_model(model)
+
+        await take_snapshot(DB_PATH, "peer_skill_update")
+
+        new_skill = (
+            model.get("capabilities", {})
+            .get(domain, {})
+            .get("estimated_skill", 0.5)
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "domain": domain,
+            "source": source,
             "new_skill": new_skill,
         })
     except Exception as e:
@@ -1290,6 +1363,130 @@ async def get_bus(n: int = 50):
         return JSONResponse(parsed)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+# ── Fleet: aggregate all instances ─────────────────────────────
+
+@app.get("/fleet")
+async def get_fleet():
+    """Aggregate health, skills, tasks from local + all peers."""
+    import json as _json
+    import urllib.request as _ureq
+    from config import TOKEN_PATH as _tp
+
+    fleet = {"instances": [], "shared_skills": {}, "task_board": [], "timeline": []}
+    local_token = _tp.read_text().strip() if _tp.exists() else ""
+
+    async def _add_instance(name: str, url: str, token: str, is_local: bool):
+        instance = {
+            "name": name, "url": url, "is_local": is_local,
+            "status": "offline", "uptime_s": 0, "coherence": 0,
+            "skills": [], "tasks": {}, "sessions": [],
+        }
+        headers = {"Authorization": f"Bearer {token}"} if token else {}
+
+        # Health
+        try:
+            r = await asyncio.to_thread(
+                lambda: _ureq.urlopen(_ureq.Request(f"{url}/health", headers=headers), timeout=5)
+            )
+            h = _json.loads(r.read())
+            instance["status"] = "online"
+            instance["uptime_s"] = h.get("uptime_s", 0)
+            instance["coherence"] = h.get("mps_coherence", 0)
+            instance["version"] = h.get("version", "?")
+        except Exception:
+            pass
+
+        # Self-model / skills
+        try:
+            r = await asyncio.to_thread(
+                lambda: _ureq.urlopen(_ureq.Request(f"{url}/self", headers=headers), timeout=5)
+            )
+            model = _json.loads(r.read())
+            caps = model.get("capabilities", {})
+            for domain, data in caps.items():
+                skill = {
+                    "domain": domain,
+                    "level": data.get("estimated_skill", 0),
+                    "confidence": data.get("confidence", 0),
+                    "observations": data.get("n_observations", 0),
+                }
+                instance["skills"].append(skill)
+                # Aggregate into shared_skills
+                if domain not in fleet["shared_skills"]:
+                    fleet["shared_skills"][domain] = {"instances": [], "max_skill": 0, "total_obs": 0}
+                fleet["shared_skills"][domain]["instances"].append(name)
+                fleet["shared_skills"][domain]["max_skill"] = max(
+                    fleet["shared_skills"][domain]["max_skill"], skill["level"]
+                )
+                fleet["shared_skills"][domain]["total_obs"] += skill["observations"]
+        except Exception:
+            pass
+
+        # Tasks
+        try:
+            r = await asyncio.to_thread(
+                lambda: _ureq.urlopen(_ureq.Request(f"{url}/tasks/stats", headers=headers), timeout=5)
+            )
+            tdata = _json.loads(r.read())
+            instance["tasks"] = tdata.get("tasks", {})
+
+            # Open tasks for shared board
+            r2 = await asyncio.to_thread(
+                lambda: _ureq.urlopen(
+                    _ureq.Request(f"{url}/tasks?status=todo,in_progress,blocked&limit=20", headers=headers),
+                    timeout=5,
+                )
+            )
+            tasks = _json.loads(r2.read())
+            if isinstance(tasks, list):
+                for t in tasks:
+                    fleet["task_board"].append({
+                        "id": t["id"], "title": t["title"],
+                        "status": t["status"], "priority": t["priority"],
+                        "assigned_to": t.get("assigned_to", "any"),
+                        "project": t.get("project_name", ""),
+                        "instance": name,
+                    })
+        except Exception:
+            pass
+
+        # Sessions (local only — peers don't expose session log)
+        if is_local:
+            try:
+                sessions_path = VEX_HOME / "vex_workspace" / "vex_sessions.jsonl"
+                if sessions_path.exists():
+                    for line in sessions_path.read_text().strip().split("\n"):
+                        if line.strip():
+                            s = _json.loads(line)
+                            fleet["timeline"].append({
+                                "instance": name,
+                                "session": s.get("name", ""),
+                                "number": s.get("number", 0),
+                                "started": s.get("started", ""),
+                            })
+            except Exception:
+                pass
+
+        fleet["instances"].append(instance)
+
+    # Local first
+    await _add_instance(VEX_INSTANCE, f"http://localhost:{PORT}", local_token, True)
+
+    # Peers
+    peer_config = peers.load_peers()
+    for peer_name, peer_data in peer_config.get("peers", {}).items():
+        await _add_instance(peer_name, peer_data["url"], peer_data.get("token", ""), False)
+
+    # Sort task board by priority
+    prio_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    fleet["task_board"].sort(key=lambda t: prio_order.get(t["priority"], 9))
+
+    # Sort timeline by session number desc
+    fleet["timeline"].sort(key=lambda s: s["number"], reverse=True)
+
+    return JSONResponse(fleet)
 
 
 # ── Sync / version tracking ────────────────────────────────────
