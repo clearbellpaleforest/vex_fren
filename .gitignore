@@ -75,3 +75,10 @@ temporal_field_pro.json
 quality_log.jsonl
 monologue_log.jsonl
 watcher_state.json
+
+# Runtime-generated files (created by daemon during operation)
+SOUL.md
+vex_workspace/action_log.jsonl
+vex_workspace/soul_version.json
+vex_workspace/monologue_log.jsonl
+vex_workspace/watcher_state.json
