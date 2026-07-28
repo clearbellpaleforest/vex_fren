@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from config import VEX_HOME, MEMORY_DIR, DIARY_PATH, SELF_MODEL_PATH, META_STATE_PATH
+from temporal_depth import get_temporal_depth
 
 TICK_INTERVAL_SECONDS = 300  # 5 minutes
 INBOX_POLL_SECONDS = 30      # check comms every 30s
@@ -160,6 +161,13 @@ async def run_heartbeat(
             session_active = await detect_session_active()
             state.last_tick = now_iso
             state.tick_count += 1
+
+            # 3a. Update temporal depth — felt texture of time
+            try:
+                td = get_temporal_depth()
+                td.tick(is_active=session_active, tick_interval_seconds=tick_interval)
+            except Exception:
+                pass
 
             # 4. Idle pulse
             if not session_active:

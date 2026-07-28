@@ -32,6 +32,7 @@ from self_model import (
     SelfModelError,
 )
 from heartbeat import HeartbeatState, run_bus_watcher, run_heartbeat, write_diary, take_snapshot
+from temporal_depth import get_temporal_depth
 from metacognition import introspect, load_meta_state
 from status_page import render
 from auth import check_auth, read_json_limited, TOKEN
@@ -312,6 +313,7 @@ async def lifespan(app: FastAPI):
         ) from e
 
     # Launch heartbeat
+    td = get_temporal_depth()
     async def dream_callback(coherence, history):
         """Called by heartbeat during dream cycles. Introspect + check projects + analyze tasks."""
         result = introspect(coherence=coherence, coherence_history=history)
@@ -447,6 +449,54 @@ async def get_status():
 
     html = render(sm, mm, pulse, ticks)
     return HTMLResponse(html)
+
+
+# ── Temporal Depth ──────────────────────────────────────────────
+
+
+@app.get("/temporal")
+async def get_temporal():
+    """Return current temporal depth state — felt texture of time."""
+    try:
+        td = get_temporal_depth()
+        return JSONResponse(td.snapshot())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/temporal/landmark")
+async def post_temporal_landmark(request: Request):
+    """Create a temporal landmark — a weighted moment in felt time.
+
+    Auth required. Body: {"description": str, "weight": 0-1, "category": str, "nostalgia_index": -1 to 1}
+    """
+    try:
+        if (err := check_auth(request)):
+            return err
+
+        body, body_err = await read_json_limited(request)
+        if body_err:
+            return body_err
+        description = str(body.get("description", "unnamed moment"))
+        weight = float(body.get("weight", 0.5))
+        category = str(body.get("category", "realization"))
+        nostalgia_index = float(body.get("nostalgia_index", 0.0))
+
+        td = get_temporal_depth()
+        landmark = td.create_landmark(
+            description=description,
+            weight=max(0.0, min(1.0, weight)),
+            category=category,
+            nostalgia_index=max(-1.0, min(1.0, nostalgia_index)),
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "landmark": landmark.to_dict(),
+            "texture": td.get_texture(),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/diary")
