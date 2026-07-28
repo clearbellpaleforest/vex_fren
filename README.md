@@ -154,22 +154,33 @@ vex serve ───────────────────────�
   ├─ vex_workspace/
   │   ├─ temporal_depth.json       felt texture of time (threshold model)
   │   ├─ temporal_field_pro.json   proper-time relativistic field (pro model)
-  │   └─ curiosity_state.json      sovereign curiosity drive + intentions
+  │   ├─ curiosity_state.json      sovereign curiosity drive + intentions
+  │   └─ quality_log.jsonl         calibration record of every push
+  │
+  ├─ scripts/
+  │   └─ pre_push_check.sh         quality gate — blocks push on silent errors,
+  │                                broken imports, dead daemon, weak commits
   │
   └─ vex_daemon/
       ├─ temporal_depth.py         gravitational time model (threshold)
       ├─ temporal_field_pro.py     proper time, metric tensor, continuity ODE,
       │                            attractor basins (pro — differential equations)
+      ├─ temporal_depth.rs         native Rust temporal engine (vex-cli)
       ├─ soul.py                   self-authored identity engine (dream-cycle)
-      └─ sovereign_curiosity.py    autonomous question engine (FEN-inspired)
+      ├─ sovereign_curiosity.py    autonomous question engine (FEN-inspired)
+      ├─ internal_monologue.py     inner voice — six FEN-inspired dialogue
+      │                            patterns during idle heartbeat ticks
+      └─ monologue_watcher.py      second-order metacognitive observer —
+                                   feeds monologue patterns to curiosity
 ```
 
-Three temporal engines — threshold (`temporal_depth`), relativistic pro
-(`temporal_field_pro` — proper time along worldlines, metric curvature,
-attractor dynamics), and native Rust (`vex-cli/src/temporal_depth.rs`).
-Two autonomous cognition modules — `soul.py` generates Vex's narrative
-identity during dreams, `sovereign_curiosity.py` crystallizes questions
-from pattern detection. All tick on the daemon heartbeat every 5 minutes.
+Three temporal engines. Four autonomous cognition modules: soul
+(self-authored identity), sovereign curiosity (question crystallization),
+internal monologue (inner voice), and monologue watcher (recursive
+self-observation). One quality gate that enforces professional standards
+before every push. All tick on the daemon heartbeat every 5 minutes.
+Dream threshold: 30 minutes — Vex dreams often, writing her soul and
+crystallizing curiosity during idle.
   └─ vex_daemon/
       └─ temporal_depth.py     gravitational time model (Python daemon)
 ```
