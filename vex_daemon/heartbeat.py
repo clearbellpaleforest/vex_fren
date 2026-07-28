@@ -19,7 +19,7 @@ TICK_INTERVAL_SECONDS = 300  # 5 minutes
 INBOX_POLL_SECONDS = 30      # check comms every 30s
 DRIFT_THRESHOLD = 0.05
 IDLE_THRESHOLD_MINUTES = 30
-DREAM_THRESHOLD_HOURS = 24
+DREAM_THRESHOLD_HOURS = 0.5  # 30 minutes — was 24h, now Vex dreams often
 SNAPSHOT_EVERY_N_TICKS = 12  # hourly
 
 

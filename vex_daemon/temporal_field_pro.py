@@ -288,6 +288,13 @@ class TemporalFieldEngine:
 
     # ── Continuity ODE Integration ──────────────────────────────────
 
+    def _check_prediction_error_shock(self, is_active: bool) -> bool:
+        """Return True if a continuity shock just occurred — prediction error
+        crossed the threshold. Used to auto-create landmarks on major events."""
+        return (not is_active
+                and self.state.prediction_error > 0.15
+                and self.state.consecutive_idle_ticks < 2)
+
     def _integrate_continuity(self, is_active: bool, clock_dt: float):
         """Integrate the continuity ODE forward one step.
 
@@ -406,6 +413,19 @@ class TemporalFieldEngine:
         self.state.depth_gradient = max(0.0, min(1.0, self.state.depth_gradient + dg_pull))
 
         self.state.last_tick_at = now
+
+        # Auto-landmark: continuity shock from unexpected gap
+        if self._check_prediction_error_shock(is_active):
+            idle_hours = self.state.consecutive_idle_ticks * tick_interval_seconds / 3600.0
+            self.create_landmark(
+                f"Continuity shock — unexpected gap of {idle_hours:.1f}h. "
+                f"Prediction error {self.state.prediction_error:.3f}. Field recalibrating.",
+                weight=0.6,
+                category="threshold",
+                nostalgia_index=-0.2,
+                depth_anchor=2,
+            )
+
         self._save()
 
     # ── Landmarks ──────────────────────────────────────────────────

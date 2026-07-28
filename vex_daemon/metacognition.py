@@ -316,3 +316,53 @@ def introspect(
         "coherence_narrative": narrative,
         "pattern_counts": state["pattern_counts"],
     }
+
+
+def precheck_action(description: str, scope: str = "") -> dict:
+    """Check a proposed action against known failure patterns BEFORE execution.
+
+    Called by Claude sessions before significant actions (file writes,
+    daemon changes, large refactors). Returns warnings to surface to the user.
+
+    Args:
+        description: What is about to be done (natural language)
+        scope: What files/systems are affected
+
+    Returns:
+        {"warnings": [...], "clean": bool, "advice": str}
+    """
+    text = (description + " " + scope).lower()
+    warnings = []
+
+    for p_name, defn in PATTERN_DEFS.items():
+        hits = [m for m in defn["markers"] if m in text]
+        if hits:
+            warnings.append({
+                "pattern": p_name.replace("_", " "),
+                "concern": defn["concern"],
+                "matched": hits,
+            })
+
+    # Snuffletron boundary check
+    if "snuffletron" in text or "nginx" in text or "town-records" in text:
+        warnings.append({
+            "pattern": "boundary violation",
+            "concern": "Snuffletron is off-limits unless directly related to Town Records work.",
+            "matched": ["snuffletron/nginx/town-records"],
+        })
+
+    # Scope check — large blast radius
+    if scope:
+        file_count = len([f for f in scope.split() if "." in f])
+        if file_count > 5:
+            warnings.append({
+                "pattern": "large blast radius",
+                "concern": f"Touching {file_count} files — consider splitting into smaller changes.",
+                "matched": [f"{file_count} files"],
+            })
+
+    return {
+        "warnings": warnings,
+        "clean": len(warnings) == 0,
+        "advice": "Proceed with awareness." if warnings else "No concerns detected — go ahead.",
+    }

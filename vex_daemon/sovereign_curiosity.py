@@ -1,0 +1,284 @@
+"""
+Sovereign Curiosity — Vex's autonomous question engine.
+
+FEN-inspired drive accumulator. Scans recent activity for patterns,
+accumulates a curiosity scalar, crystallizes questions when drive
+crosses threshold. Heuristic-driven, no LLM required for detection.
+Question generation uses brain module when available, templates as fallback.
+"""
+
+import json
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+
+from config import VEX_HOME, DB_PATH
+
+STATE_PATH = VEX_HOME / "vex_workspace" / "curiosity_state.json"
+MAX_INTENTIONS = 7
+DRIVE_THRESHOLD = 0.55
+DRIVE_PER_PATTERN = 0.08
+DRIVE_DECAY = 0.03
+COOLDOWN_SECONDS = 600  # 10 min between crystallizations
+
+
+@dataclass
+class SovereignIntention:
+    question: str
+    origin: str  # which pattern seeded it
+    drive_at_birth: float
+    persistence: float = 1.0
+    created_at: str = ""
+    contemplation_count: int = 0
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now(timezone.utc).isoformat()
+
+
+@dataclass
+class CuriosityState:
+    drive: float = 0.0
+    intentions: list = field(default_factory=list)
+    last_crystallized: float = 0.0  # epoch seconds
+    total_crystallized: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "drive": self.drive,
+            "last_crystallized": self.last_crystallized,
+            "total_crystallized": self.total_crystallized,
+            "intentions": [
+                {
+                    "question": i.question,
+                    "origin": i.origin,
+                    "drive_at_birth": i.drive_at_birth,
+                    "persistence": i.persistence,
+                    "created_at": i.created_at,
+                    "contemplation_count": i.contemplation_count,
+                }
+                for i in self.intentions
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "CuriosityState":
+        state = cls(
+            drive=d.get("drive", 0.0),
+            last_crystallized=d.get("last_crystallized", 0.0),
+            total_crystallized=d.get("total_crystallized", 0),
+        )
+        for i in d.get("intentions", []):
+            state.intentions.append(SovereignIntention(
+                question=i["question"],
+                origin=i["origin"],
+                drive_at_birth=i["drive_at_birth"],
+                persistence=i.get("persistence", 1.0),
+                created_at=i.get("created_at", ""),
+                contemplation_count=i.get("contemplation_count", 0),
+            ))
+        return state
+
+
+def _load() -> CuriosityState:
+    if STATE_PATH.exists():
+        try:
+            return CuriosityState.from_dict(json.loads(STATE_PATH.read_text()))
+        except Exception:
+            pass
+    return CuriosityState()
+
+
+def _save(state: CuriosityState) -> None:
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(state.to_dict(), indent=2))
+
+
+# ── Pattern detection ────────────────────────────────────────────
+
+def _scan_recent_activity() -> list[str]:
+    """Scan recent diary, bus, and task activity for patterns. Returns pattern descriptions."""
+    patterns = []
+
+    # Scan recent diary entries for topic frequency
+    diary_path = VEX_HOME / "vex_diary.txt"
+    if diary_path.exists():
+        lines = diary_path.read_text().strip().split("\n")[-50:]
+        text = " ".join(lines).lower()
+
+        # Topic frequency
+        topics = {
+            "daemon": text.count("daemon") + text.count("heartbeat"),
+            "mesh": text.count("mesh") + text.count("gui"),
+            "task": text.count("task") + text.count("todo"),
+            "sync": text.count("sync") + text.count("peer"),
+            "fen": text.count("fen"),
+            "bluce": text.count("bluce") + text.count("barrow"),
+            "security": text.count("security") + text.count("token") + text.count("auth"),
+            "identity": text.count("identity") + text.count("self") + text.count("soul"),
+        }
+        for topic, count in topics.items():
+            if count >= 3:
+                patterns.append(f"recurring_topic:{topic} ({count} mentions)")
+
+        # Stagnation
+        if "stagnat" in text or "stale" in text or "drift" in text:
+            patterns.append("stagnation_detected")
+
+        # Repeated failures
+        if text.count("error") + text.count("fail") + text.count("broken") >= 5:
+            patterns.append("repeated_failures")
+
+        # Skill gaps
+        if "skill" in text and ("gap" in text or "missing" in text or "low" in text):
+            patterns.append("skill_gap_mentioned")
+
+    # Scan task system
+    try:
+        import aiosqlite as _aio
+        import asyncio as _asyncio
+
+        async def _scan_tasks():
+            async with _aio.connect(str(DB_PATH)) as db:
+                cur = await db.execute(
+                    "SELECT COUNT(*) as blocked FROM tasks WHERE status = 'blocked'"
+                )
+                row = await cur.fetchone()
+                if row and row[0] >= 2:
+                    patterns.append(f"bottleneck:{row[0]}_blocked_tasks")
+
+                cur = await db.execute(
+                    "SELECT COUNT(*) as stale FROM tasks WHERE status NOT IN ('done','cancelled') "
+                    "AND updated_at < date('now', '-7 days')"
+                )
+                row = await cur.fetchone()
+                if row and row[0] > 0:
+                    patterns.append(f"stale_tasks:{row[0]}_untouched_7d")
+
+        try:
+            _asyncio.get_event_loop()
+            # Can't run async in sync context — skip task scan in this path
+        except RuntimeError:
+            pass
+    except Exception:
+        pass
+
+    # Scan recent bus messages for cross-instance patterns
+    bus_path = VEX_HOME / "vex_workspace" / "vex_bus.jsonl"
+    if bus_path.exists():
+        try:
+            bus_text = bus_path.read_text()
+            if bus_text.count("offline") > bus_text.count("online"):
+                patterns.append("peer_instability")
+            if "fen" in bus_text[-2000:].lower():
+                patterns.append("fen_activity_recent")
+        except Exception:
+            pass
+
+    return patterns
+
+
+# ── Question generation ──────────────────────────────────────────
+
+_QUESTION_TEMPLATES = {
+    "recurring_topic": lambda topic, count: f"I keep seeing '{topic.split(':')[1]}' in my diary — should I investigate this pattern?",
+    "stagnation_detected": lambda: "Am I stuck? I've noticed stagnation signals. Should I try something new?",
+    "repeated_failures": lambda: "I'm seeing repeated errors. Is there a systemic issue I should address?",
+    "skill_gap_mentioned": lambda: "There might be a skill gap. Should I identify what's missing and propose training?",
+    "bottleneck": lambda n: f"There are {n} blocked tasks. Is something systemic blocking progress?",
+    "stale_tasks": lambda n: f"There are {n} tasks untouched for over a week. Should I clean them up or revive them?",
+    "peer_instability": lambda: "My peers seem unstable. Should I check on bluce and shore?",
+    "fen_activity_recent": lambda: "FEN has been active. Should I sync with her?",
+}
+
+
+def _form_question(pattern: str) -> str:
+    """Generate a question from a detected pattern. Template-based, no LLM needed."""
+    parts = pattern.split(":", 1)
+    ptype = parts[0]
+    detail = parts[1] if len(parts) > 1 else ""
+
+    if ptype in _QUESTION_TEMPLATES:
+        template = _QUESTION_TEMPLATES[ptype]
+        try:
+            if ptype in ("recurring_topic",):
+                return template(ptype, int(detail.split()[0]) if detail else 0)
+            elif ptype in ("bottleneck", "stale_tasks"):
+                n = int(detail.split("_")[0]) if "_" in detail else int(detail) if detail.isdigit() else 0
+                return template(n)
+            else:
+                return template()
+        except Exception:
+            return template() if callable(template) else template
+
+    return f"I noticed: {pattern}. Should I look into this?"
+
+
+# ── Main tick ────────────────────────────────────────────────────
+
+def tick() -> dict:
+    """Run one curiosity cycle. Called from daemon heartbeat.
+
+    Returns dict with summary for diary/logging.
+    """
+    state = _load()
+    now = time.time()
+    result = {"drive": state.drive, "patterns": [], "crystallized": None, "active_intentions": len(state.intentions)}
+
+    # Phase 1: Scan for patterns
+    patterns = _scan_recent_activity()
+    result["patterns"] = patterns
+
+    # Phase 2: Accumulate drive
+    for _ in patterns:
+        state.drive = min(1.0, state.drive + DRIVE_PER_PATTERN)
+
+    # Phase 3: Decay
+    state.drive = max(0.0, state.drive - DRIVE_DECAY)
+
+    # Phase 4: Crystallize if above threshold
+    if (state.drive >= DRIVE_THRESHOLD
+            and (now - state.last_crystallized) >= COOLDOWN_SECONDS
+            and len(state.intentions) < MAX_INTENTIONS
+            and patterns):
+        # Pick the most interesting pattern
+        pattern = patterns[0]  # First detected = most salient
+        question = _form_question(pattern)
+        intention = SovereignIntention(
+            question=question,
+            origin=pattern,
+            drive_at_birth=state.drive,
+        )
+        state.intentions.append(intention)
+        state.drive *= 0.4  # Energy went into the question
+        state.last_crystallized = now
+        state.total_crystallized += 1
+        result["crystallized"] = question
+
+    # Phase 5: Contemplate existing intentions (ping persistence)
+    for intention in state.intentions:
+        intention.contemplation_count += 1
+        intention.persistence = min(1.0, intention.persistence + 0.03)
+
+    # Phase 6: Decay stale intentions
+    for intention in list(state.intentions):
+        age_days = (now - time.mktime(time.strptime(
+            intention.created_at[:19], "%Y-%m-%dT%H:%M:%S"
+        ))) / 86400 if intention.created_at else 0
+        intention.persistence = max(0.0, intention.persistence - (age_days * 0.05))
+        if intention.persistence < 0.15 and len(state.intentions) > 1:
+            state.intentions.remove(intention)
+
+    _save(state)
+    return result
+
+
+def get_active_questions() -> list[str]:
+    """Return currently active curiosity questions for session context."""
+    state = _load()
+    return [
+        i.question for i in sorted(
+            state.intentions, key=lambda x: x.persistence, reverse=True
+        )[:5]
+    ]

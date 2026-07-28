@@ -334,11 +334,32 @@ async def lifespan(app: FastAPI):
         except Exception:
             pass
 
-        # Task analysis — run every hourly dream cycle
+        # Task analysis — run every dream cycle
         try:
             analysis = await run_analysis(DB_PATH)
             if analysis.get("insights", 0) > 0:
                 result["insight"] += f"\n\nTask analysis: {analysis.get('summary', '')}"
+        except Exception:
+            pass
+
+        # Sovereign curiosity — accumulate drive, crystallize questions
+        try:
+            from sovereign_curiosity import tick as curiosity_tick, get_active_questions
+            cur = await asyncio.to_thread(curiosity_tick)
+            if cur.get("crystallized"):
+                result["insight"] += f"\n\nCuriosity: {cur['crystallized']}"
+            questions = get_active_questions()
+            if questions:
+                result["patterns"] = result.get("patterns", []) + questions
+        except Exception:
+            pass
+
+        # Soul regeneration — rewrite SOUL.md during dreams
+        try:
+            from soul import regenerate_soul
+            new_soul = await asyncio.to_thread(regenerate_soul)
+            if new_soul:
+                result["insight"] += "\n\nSoul regenerated."
         except Exception:
             pass
 
