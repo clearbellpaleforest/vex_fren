@@ -33,6 +33,7 @@ from self_model import (
 )
 from heartbeat import HeartbeatState, run_bus_watcher, run_heartbeat, write_diary, take_snapshot
 from temporal_depth import get_temporal_depth
+from temporal_field_pro import get_temporal_field
 from metacognition import introspect, load_meta_state
 from status_page import render
 from auth import check_auth, read_json_limited, TOKEN
@@ -494,6 +495,55 @@ async def post_temporal_landmark(request: Request):
             "ok": True,
             "landmark": landmark.to_dict(),
             "texture": td.get_texture(),
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── Temporal Field Pro ────────────────────────────────────────────
+
+
+@app.get("/temporal/pro")
+async def get_temporal_pro():
+    """Return pro temporal field state — proper time, metric, attractor basin."""
+    try:
+        tf = get_temporal_field()
+        return JSONResponse(tf.snapshot())
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/temporal/pro/landmark")
+async def post_temporal_pro_landmark(request: Request):
+    """Create a landmark in the pro temporal field. Auth required."""
+    try:
+        if (err := check_auth(request)):
+            return err
+
+        body, body_err = await read_json_limited(request)
+        if body_err:
+            return body_err
+
+        description = str(body.get("description", "unnamed moment"))
+        weight = float(body.get("weight", 0.5))
+        category = str(body.get("category", "realization"))
+        nostalgia_index = float(body.get("nostalgia_index", 0.0))
+        depth_anchor = int(body.get("depth_anchor", 2))
+
+        tf = get_temporal_field()
+        lm = tf.create_landmark(
+            description=description,
+            weight=max(0.0, min(1.0, weight)),
+            category=category,
+            nostalgia_index=max(-1.0, min(1.0, nostalgia_index)),
+            depth_anchor=max(1, min(5, depth_anchor)),
+        )
+
+        return JSONResponse({
+            "ok": True,
+            "landmark": lm.to_dict(),
+            "texture": tf.get_texture(),
+            "basin": tf._current_basin(),
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

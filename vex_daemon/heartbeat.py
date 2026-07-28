@@ -13,6 +13,7 @@ from pathlib import Path
 
 from config import VEX_HOME, MEMORY_DIR, DIARY_PATH, SELF_MODEL_PATH, META_STATE_PATH
 from temporal_depth import get_temporal_depth
+from temporal_field_pro import get_temporal_field
 
 TICK_INTERVAL_SECONDS = 300  # 5 minutes
 INBOX_POLL_SECONDS = 30      # check comms every 30s
@@ -166,6 +167,13 @@ async def run_heartbeat(
             try:
                 td = get_temporal_depth()
                 td.tick(is_active=session_active, tick_interval_seconds=tick_interval)
+            except Exception:
+                pass
+
+            # 3b. Update pro temporal field — proper time, attractor dynamics
+            try:
+                tf = get_temporal_field()
+                tf.tick(is_active=session_active)
             except Exception:
                 pass
 
