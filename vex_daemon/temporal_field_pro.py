@@ -68,9 +68,9 @@ SIGMA_TIME = 3600.0               # 1 hour gaussian kernel width for time curvat
 SIGMA_WEIGHT = 7200.0             # 2 hours for weight-space curvature
 
 # Continuity ODE parameters
-ALPHA_RECOVERY = 0.08             # per-tick recovery rate toward 1.0
-BETA_DECAY = 0.03                 # per-tick idle decay rate toward 0.1
-GAMMA_PE = 0.15                   # prediction error sensitivity
+ALPHA_RECOVERY = 0.06             # per-tick recovery rate toward 1.0
+BETA_DECAY = 0.08                 # per-tick idle decay rate toward 0.1
+GAMMA_PE = 0.20                   # prediction error sensitivity
 C_MIN = 0.1                       # minimum continuity (never reaches 0)
 C_MAX = 1.0                       # maximum continuity
 SMOOTHING_TAU = 0.3               # exponential moving average weight for field smoothing
@@ -345,12 +345,18 @@ class TemporalFieldEngine:
 
     # ── Tick ───────────────────────────────────────────────────────
 
-    def tick(self, is_active: bool = False):
+    def tick(self, is_active: bool = False, tick_interval_seconds: float = TICK_INTERVAL):
         """Integrate the temporal field forward one daemon tick."""
         import time
         now = time.time()
-        clock_dt = TICK_INTERVAL if self.state.last_tick_at == 0 else now - self.state.last_tick_at
-        clock_dt = max(1.0, min(clock_dt, 3600.0))  # clamp to [1s, 1hr]
+        # Use tick_interval as the canonical dt — real daemon ticks every 300s.
+        # If called more frequently (e.g. in tests), use the max of actual
+        # elapsed and tick_interval to avoid micro-steps that don't evolve.
+        clock_dt = tick_interval_seconds
+        if self.state.last_tick_at > 0:
+            actual_elapsed = now - self.state.last_tick_at
+            clock_dt = max(tick_interval_seconds, actual_elapsed)
+        clock_dt = min(clock_dt, 3600.0)  # cap at 1 hour
 
         # Update idle tracking
         if is_active:
