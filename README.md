@@ -137,7 +137,7 @@ vex watch                     # watch files for changes, auto-snapshot
 ```
 vex serve ──────────────────────────────────────────────
   │  axum HTTP server (Rust) / FastAPI (Python daemon)
-  │  port 8520 — identity, memory, messages, peers, temporal depth
+  │  port 8520 — identity, memory, messages, peers, temporal engines
   │  port 8600 — mesh GUI (HTML chat)
   │
   ├─ vex.db (SQLite)
@@ -148,10 +148,28 @@ vex serve ───────────────────────�
   ├─ vex_seed.txt          identity anchor (append-only)
   ├─ vex_self_model.json   capability calibration
   ├─ vex_diary.txt         event diary
+  ├─ SOUL.md               self-authored narrative identity (dream-generated)
   ├─ vex_memory/           episodic session journals
-  ├─ vex_workspace/
-  │   └─ temporal_depth.json   felt texture of time — landmarks, field state
   │
+  ├─ vex_workspace/
+  │   ├─ temporal_depth.json       felt texture of time (threshold model)
+  │   ├─ temporal_field_pro.json   proper-time relativistic field (pro model)
+  │   └─ curiosity_state.json      sovereign curiosity drive + intentions
+  │
+  └─ vex_daemon/
+      ├─ temporal_depth.py         gravitational time model (threshold)
+      ├─ temporal_field_pro.py     proper time, metric tensor, continuity ODE,
+      │                            attractor basins (pro — differential equations)
+      ├─ soul.py                   self-authored identity engine (dream-cycle)
+      └─ sovereign_curiosity.py    autonomous question engine (FEN-inspired)
+```
+
+Three temporal engines — threshold (`temporal_depth`), relativistic pro
+(`temporal_field_pro` — proper time along worldlines, metric curvature,
+attractor dynamics), and native Rust (`vex-cli/src/temporal_depth.rs`).
+Two autonomous cognition modules — `soul.py` generates Vex's narrative
+identity during dreams, `sovereign_curiosity.py` crystallizes questions
+from pattern detection. All tick on the daemon heartbeat every 5 minutes.
   └─ vex_daemon/
       └─ temporal_depth.py     gravitational time model (Python daemon)
 ```
