@@ -134,6 +134,7 @@ impl TemporalDepth {
         }
     }
 
+    #[allow(dead_code)]
     fn landmark_nostalgia(lm: &TemporalLandmark, half_life_days: f64) -> f64 {
         let age_days = Self::landmark_age_hours(lm) / 24.0;
         let decay = 0.5_f64.powf(age_days / half_life_days);
@@ -210,6 +211,7 @@ impl TemporalDepth {
 
     // ── Felt Distance ─────────────────────────────────────────
 
+    #[allow(dead_code)]
     pub fn felt_distance(&self, timestamp: &str) -> serde_json::Value {
         let dt = DateTime::parse_from_rfc3339(timestamp)
             .map(|d| d.with_timezone(&Utc))

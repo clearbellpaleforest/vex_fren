@@ -1278,6 +1278,28 @@ pub async fn run(
             msg_type TEXT NOT NULL DEFAULT 'message',
             read INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER,
+            parent_id INTEGER,
+            title TEXT NOT NULL,
+            description TEXT DEFAULT '',
+            status TEXT DEFAULT 'todo',
+            priority TEXT DEFAULT 'medium',
+            progress REAL DEFAULT 0.0,
+            source_agent TEXT DEFAULT 'vex',
+            source_session TEXT,
+            assigned_to TEXT DEFAULT 'any',
+            tags TEXT DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            started_at TEXT,
+            completed_at TEXT,
+            deadline TEXT,
+            estimated_hours REAL,
+            actual_hours REAL,
+            meta TEXT DEFAULT '{}'
+        );
         CREATE TABLE IF NOT EXISTS diary_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1349,6 +1371,146 @@ pub async fn run(
                     Json(serde_json::json!({"error": "lock failed"})),
                 ),
             }
+        }))
+        .route("/temporal/pro", get(|
+            State(st): State<Arc<AppState>>,
+        | async move {
+            match st.temporal_depth.lock() {
+                Ok(td) => {
+                    let snap = td.snapshot();
+                    let pro = serde_json::json!({
+                        "proper_time": snap["field"]["felt_duration_since_last"],
+                        "coordinate_time": chrono::Utc::now().to_rfc3339(),
+                        "metric_tensor": {
+                            "g_tt": snap["field"]["compression_ratio"],
+                            "g_rr": 1.0 / snap["field"]["compression_ratio"].as_f64().unwrap_or(1.0).max(0.01),
+                            "curvature_sign": if snap["field"]["compression_ratio"].as_f64().unwrap_or(1.0) > 1.0 { "stretched" } else if snap["field"]["compression_ratio"].as_f64().unwrap_or(1.0) < 1.0 { "compressed" } else { "flat" },
+                        },
+                        "continuity": {
+                            "coherence": snap["field"]["depth_gradient"],
+                            "dC_dt": snap["field"]["anticipation_pressure"],
+                            "prediction_error": 0.0,
+                            "basin": snap["field"]["recent_tone"],
+                        },
+                        "attractor_basins": {
+                            "current": snap["field"]["recent_tone"],
+                            "cathedral_weight": if snap["field"]["recent_tone"] == "reverent" { 0.8 } else { 0.1 },
+                            "flow_weight": if snap["field"]["recent_tone"] == "engaged" { 0.8 } else { 0.2 },
+                            "dilated_weight": if snap["field"]["recent_tone"] == "waiting" { 0.7 } else { 0.1 },
+                            "shallow_weight": if snap["field"]["recent_tone"] == "neutral" { 0.6 } else { 0.1 },
+                            "turbulent_weight": if snap["field"]["recent_tone"] == "grief" { 0.9 } else { 0.05 },
+                        },
+                        "landmarks": snap["landmarks"],
+                        "texture": snap["texture"],
+                        "texture_sentence": td.get_texture(),
+                        "context_for_prompt": td.get_context_for_prompt(),
+                    });
+                    Json(pro)
+                }
+                Err(_) => Json(serde_json::json!({"error": "lock failed"})),
+            }
+        }))
+        .route("/temporal/pro/landmark", post(|
+            State(st): State<Arc<AppState>>,
+            headers: HeaderMap,
+            body: String,
+        | async move {
+            if let Err(err) = check_auth(&headers, &st.token) {
+                return err;
+            }
+            let payload: Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(_) => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "invalid JSON"})),
+                ),
+            };
+            let description = payload.get("description").and_then(|v| v.as_str()).unwrap_or("unnamed moment");
+            let weight = payload.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let category = payload.get("category").and_then(|v| v.as_str()).unwrap_or("realization");
+            let nostalgia = payload.get("nostalgia_index").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            match st.temporal_depth.lock() {
+                Ok(mut td) => {
+                    let lm = td.create_landmark(description, weight, category, nostalgia);
+                    td.save();
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "ok": true,
+                            "landmark": lm,
+                            "proper_time": td.snapshot()["field"]["felt_duration_since_last"],
+                            "texture": td.get_texture(),
+                        })),
+                    )
+                }
+                Err(_) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "lock failed"})),
+                ),
+            }
+        }))
+        .route("/tasks", get(|
+            State(st): State<Arc<AppState>>,
+            axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+        | async move {
+            let status = params.get("status").map(|s| s.as_str()).unwrap_or("");
+            let sort = params.get("sort").map(|s| s.as_str()).unwrap_or("priority");
+            let order = params.get("order").map(|s| s.as_str()).unwrap_or("desc");
+            let limit: i64 = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50);
+            let offset: i64 = params.get("offset").and_then(|s| s.parse().ok()).unwrap_or(0);
+            let assigned = params.get("assigned_to").map(|s| s.as_str()).unwrap_or("");
+
+            let rows: Vec<Value> = {
+                let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+                let mut sql = String::from("SELECT * FROM tasks WHERE 1=1");
+
+                if !status.is_empty() {
+                    let statuses: Vec<String> = status.split(',').map(|s| format!("'{}'", s.trim())).collect();
+                    sql.push_str(&format!(" AND status IN ({})", statuses.join(",")));
+                }
+                if !assigned.is_empty() {
+                    sql.push_str(&format!(" AND (assigned_to = '{}' OR assigned_to = 'any')", assigned.replace('\'', "''")));
+                }
+
+                let sort_col = match sort { "priority" => "CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END", _ => "created_at" };
+                sql.push_str(&format!(" ORDER BY {} {}", sort_col, if order == "asc" { "ASC" } else { "DESC" }));
+                sql.push_str(&format!(" LIMIT {} OFFSET {}", limit, offset));
+
+                let mut stmt = db.prepare(&sql).unwrap();
+                stmt.query_map([], |row| {
+                    Ok(serde_json::json!({
+                        "id": row.get::<_, i64>(0)?,
+                        "title": row.get::<_, String>(3)?,
+                        "status": row.get::<_, String>(5)?,
+                        "priority": row.get::<_, String>(6)?,
+                        "progress": row.get::<_, f64>(7)?,
+                        "source_agent": row.get::<_, String>(8)?,
+                        "assigned_to": row.get::<_, String>(11)?,
+                        "created_at": row.get::<_, String>(13)?,
+                        "updated_at": row.get::<_, String>(14)?,
+                    }))
+                }).unwrap().filter_map(|r| r.ok()).collect()
+            };
+
+            Json(serde_json::Value::Array(rows))
+        }))
+        .route("/tasks/stats", get(|
+            State(st): State<Arc<AppState>>,
+        | async move {
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            let todo: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status='todo'", [], |r| r.get(0)).unwrap_or(0);
+            let in_progress: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status='in_progress'", [], |r| r.get(0)).unwrap_or(0);
+            let done: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status IN ('completed','done')", [], |r| r.get(0)).unwrap_or(0);
+            let blocked: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status='blocked'", [], |r| r.get(0)).unwrap_or(0);
+            let total: i64 = db.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0)).unwrap_or(0);
+            drop(db);
+            Json(serde_json::json!({
+                "todo": todo,
+                "in_progress": in_progress,
+                "completed": done,
+                "blocked": blocked,
+                "total": total,
+            }))
         }))
         .route("/health", get(health))
         .route("/seed", get(get_seed))
