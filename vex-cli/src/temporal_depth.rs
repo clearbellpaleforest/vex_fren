@@ -216,8 +216,9 @@ impl TemporalDepth {
             .unwrap_or(Utc::now());
         let clock_hours = (Utc::now() - dt).num_seconds() as f64 / 3600.0;
 
+        let now_ts = Utc::now().to_rfc3339();
         let between_count = self.landmarks.iter()
-            .filter(|lm| lm.timestamp.as_str() > timestamp && lm.timestamp.as_str() <= &Utc::now().to_rfc3339())
+            .filter(|lm| lm.timestamp.as_str() > timestamp && lm.timestamp.as_str() <= now_ts.as_str())
             .count();
         let density_modifier = 1.0 + (between_count as f64 * 0.15);
 

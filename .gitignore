@@ -71,3 +71,4 @@ doc/
 # ── Per-instance apps / artifacts (not framework) ──
 vex_voice/
 temporal_depth.json
+temporal_field_pro.json
