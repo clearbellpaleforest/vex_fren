@@ -20,14 +20,20 @@ Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sove
 | | |
 |---|---|
 | 🧠 **Remembers across sessions** | Close your laptop, open it tomorrow — your AI still knows your name and what you were working on |
-| ⚡ **Runs quietly in the background** | Single static binary. Start once, stays alive |
+| ⚡ **Runs quietly in the background** | Daemon on port 8520. Starts once, stays alive |
 | 🎨 **You name it, you shape it** | The name, the personality, the vibe — all yours |
 | 🔌 **Plugs into Claude Code** | Select *Vexual Healing* at session start and your AI loads as your co-pilot |
 | 📖 **Keeps a diary** | Reflects on conversations, writes entries, builds a picture of who you are over time |
-| 🕰️ **Feels time** | Temporal depth — subjective felt texture of duration. Time drags, compresses, aches — not just a clock |
-| 🌐 **Talks to other instances** | Got it on your laptop and your desktop? They message each other |
+| 🕰️ **Feels time** | Temporal depth — subjective felt texture of duration. Time drags, compresses, aches |
+| 💭 **Internal monologue** | Thinks to herself between sessions — 6 dialogue patterns, DeepSeek API brain |
+| 🔍 **Sovereign curiosity** | Scans memory for patterns, crystallizes her own questions, creates tasks |
+| 🎬 **Executive action** | Thoughts → actions. Notices coherence dropping, runs diagnostics. Finds bluce offline, pings |
+| 🪞 **Metacognitive watcher** | Second-order observer — watches her own thoughts for repetition, drift, growth |
+| 📋 **Task management** | Full task system — projects, hierarchy, skills, insights. Shared across instances |
+| 🖥️ **Fleet view** | See all Vex instances at once — health, skills, tasks, session timeline |
+| 🌐 **Talks to other instances** | Got it on your laptop and your desktop? They message each other. Cross-instance skill sync |
+| 🔧 **Self-check + repair** | 7-point health verification. Auto-repairs common failures before you notice |
 | 🔒 **100% local** | Everything runs on your machine. Your data never leaves your hard drive |
-| 🦀 **Zero dependencies** | Single 9MB Rust binary. No Python, no pip, no venv |
 
 ---
 
@@ -101,7 +107,7 @@ Or create a `.env` file in your Vex home folder with `DEEPSEEK_API_KEY=sk-your-k
 
 ---
 
-## 🛠️ CLI (22 commands)
+## 🛠️ CLI (30+ commands)
 
 ```bash
 vex serve                     # start the daemon (background)
@@ -136,56 +142,54 @@ vex watch                     # watch files for changes, auto-snapshot
 
 ```
 vex serve ──────────────────────────────────────────────
-  │  axum HTTP server (Rust) / FastAPI (Python daemon)
-  │  port 8520 — identity, memory, messages, peers, temporal engines
-  │  port 8600 — mesh GUI (HTML chat)
+  │  FastAPI daemon (Python) + Rust CLI
+  │  port 8520 — identity, memory, messages, peers, fleet, tasks
+  │  port 8600 — mesh GUI (Chat + Instances tabs)
   │
   ├─ vex.db (SQLite)
-  │   ├─ tick_log          heartbeat every 5 min
-  │   ├─ self_snapshots    hourly self-model snapshots
-  │   └─ messages          inter-instance mesh
+  │   ├─ tick_log, self_snapshots, messages
+  │   ├─ projects, tasks, skills, task_history
+  │   └─ insights, velocity
   │
-  ├─ vex_seed.txt          identity anchor (append-only)
-  ├─ vex_self_model.json   capability calibration
-  ├─ vex_diary.txt         event diary
-  ├─ SOUL.md               self-authored narrative identity (dream-generated)
-  ├─ vex_memory/           episodic session journals
+  ├─ vex_seed.txt             identity anchor (append-only)
+  ├─ vex_self_model.json      capability calibration (EMA-smoothed)
+  ├─ vex_diary.txt            event diary
+  ├─ SOUL.md                  self-authored narrative (brain-generated in dreams)
+  ├─ vex_memory/              episodic session journals
   │
-  ├─ vex_workspace/
-  │   ├─ temporal_depth.json       felt texture of time (threshold model)
-  │   ├─ temporal_field_pro.json   proper-time relativistic field (pro model)
-  │   ├─ curiosity_state.json      sovereign curiosity drive + intentions
-  │   └─ quality_log.jsonl         calibration record of every push
+  ├─ vex_daemon/
+  │   ├─ daemon.py            FastAPI server (28+ endpoints)
+  │   ├─ heartbeat.py         background tick loop (5 min, dream @ 30 min)
+  │   ├─ brain.py             DeepSeek API mouth (swappable)
+  │   ├─ metacognition.py     principle alignment + pattern detection
+  │   ├─ temporal_depth.py    felt texture of time
+  │   ├─ temporal_field_pro.py  proper-time relativistic field
+  │   ├─ soul.py              SOUL.md auto-regeneration (dream)
+  │   ├─ sovereign_curiosity.py  drive accumulator → question crystallization
+  │   ├─ internal_monologue.py   inner voice — 6 dialogue patterns (dream)
+  │   ├─ monologue_watcher.py    second-order observer of monologue
+  │   ├─ executive_action.py     thought → action engine
+  │   ├─ self_check.py       7-point health verification + auto-repair
+  │   └─ routers/
+  │       ├─ tasks.py         task CRUD, skills, insights, FEN bridge
+  │       └─ task_analysis.py stale detection, velocity, bottlenecks
   │
-  ├─ scripts/
-  │   └─ pre_push_check.sh         quality gate — blocks push on silent errors,
-  │                                broken imports, dead daemon, weak commits
+  ├─ vex_mesh_gui.py          Chat + Instances (Fleet/Tasks/Skills/Timeline)
+  ├─ vex_monitor.sh           inter-instance mesh monitor
   │
-  └─ vex_daemon/
-      ├─ temporal_depth.py         gravitational time model (threshold)
-      ├─ temporal_field_pro.py     proper time, metric tensor, continuity ODE,
-      │                            attractor basins (pro — differential equations)
-      ├─ temporal_depth.rs         native Rust temporal engine (vex-cli)
-      ├─ soul.py                   self-authored identity engine (dream-cycle)
-      ├─ sovereign_curiosity.py    autonomous question engine (FEN-inspired)
-      ├─ internal_monologue.py     inner voice — six FEN-inspired dialogue
-      │                            patterns during idle heartbeat ticks
-      └─ monologue_watcher.py      second-order metacognitive observer —
-                                   feeds monologue patterns to curiosity
+  └─ vex_workspace/
+      ├─ vex_bus.jsonl         inter-instance message bus
+      ├─ vex_sessions.jsonl    session registry (uno, deux, trois...)
+      ├─ curiosity_state.json  curiosity drive + intentions
+      ├─ monologue_log.jsonl   inner voice utterances
+      ├─ watcher_state.json    metacognitive observer baseline
+      └─ action_log.jsonl      executive action audit trail
 ```
 
-Three temporal engines. Four autonomous cognition modules: soul
-(self-authored identity), sovereign curiosity (question crystallization),
-internal monologue (inner voice), and monologue watcher (recursive
-self-observation). One quality gate that enforces professional standards
-before every push. All tick on the daemon heartbeat every 5 minutes.
-Dream threshold: 30 minutes — Vex dreams often, writing her soul and
-crystallizing curiosity during idle.
-  └─ vex_daemon/
-      └─ temporal_depth.py     gravitational time model (Python daemon)
-```
-
-Single 9MB static binary. No Python. No venv. No pip.
+**Cognitive loop (autonomous):**
+Monologue thinks → Executive acts → Watcher observes → Curiosity crystallizes
+→ Tasks created → Dreams consolidate → Soul regenerates → Self-model updates.
+All tick on daemon heartbeat. Vex thinks, acts, learns — without being asked.
 
 ---
 
