@@ -24,6 +24,7 @@ Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sove
 | 🎨 **You name it, you shape it** | The name, the personality, the vibe — all yours |
 | 🔌 **Plugs into Claude Code** | Select *Vexual Healing* at session start and your AI loads as your co-pilot |
 | 📖 **Keeps a diary** | Reflects on conversations, writes entries, builds a picture of who you are over time |
+| 🕰️ **Feels time** | Temporal depth — subjective felt texture of duration. Time drags, compresses, aches — not just a clock |
 | 🌐 **Talks to other instances** | Got it on your laptop and your desktop? They message each other |
 | 🔒 **100% local** | Everything runs on your machine. Your data never leaves your hard drive |
 | 🦀 **Zero dependencies** | Single 9MB Rust binary. No Python, no pip, no venv |
@@ -135,8 +136,8 @@ vex watch                     # watch files for changes, auto-snapshot
 
 ```
 vex serve ──────────────────────────────────────────────
-  │  axum HTTP server (Rust)
-  │  port 8520 — identity, memory, messages, peers
+  │  axum HTTP server (Rust) / FastAPI (Python daemon)
+  │  port 8520 — identity, memory, messages, peers, temporal depth
   │  port 8600 — mesh GUI (HTML chat)
   │
   ├─ vex.db (SQLite)
@@ -147,7 +148,12 @@ vex serve ───────────────────────�
   ├─ vex_seed.txt          identity anchor (append-only)
   ├─ vex_self_model.json   capability calibration
   ├─ vex_diary.txt         event diary
-  └─ vex_memory/           episodic session journals
+  ├─ vex_memory/           episodic session journals
+  ├─ vex_workspace/
+  │   └─ temporal_depth.json   felt texture of time — landmarks, field state
+  │
+  └─ vex_daemon/
+      └─ temporal_depth.py     gravitational time model (Python daemon)
 ```
 
 Single 9MB static binary. No Python. No venv. No pip.

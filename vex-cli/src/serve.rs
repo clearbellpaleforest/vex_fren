@@ -12,6 +12,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::temporal_depth::TemporalDepth;
+
 // ── Shared state ────────────────────────────────────────────────
 
 struct AppState {
@@ -19,6 +21,7 @@ struct AppState {
     token: String,
     db: Mutex<Connection>,
     daemon_started: chrono::DateTime<chrono::Utc>,
+    temporal_depth: Mutex<TemporalDepth>,
 }
 
 // ── Auth ────────────────────────────────────────────────────────
@@ -110,6 +113,27 @@ fn apply_delta(model: &mut Value, domain: &str, delta: f64, evidence: &str) {
     if log.len() > 50 {
         log.drain(0..log.len() - 50);
     }
+}
+
+fn detect_session_active(home: &PathBuf) -> bool {
+    use std::time::SystemTime;
+    let mem_dir = memory_dir(home);
+    if !mem_dir.exists() {
+        return false;
+    }
+    let cutoff = SystemTime::now() - Duration::from_secs(600);
+    if let Ok(entries) = std::fs::read_dir(&mem_dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    if modified > cutoff {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }
 
 fn compute_coherence(home: &PathBuf) -> f64 {
@@ -1144,6 +1168,13 @@ async fn heartbeat_loop(state: Arc<AppState>) {
         tick_count += 1;
         let coherence = compute_coherence(&state.home);
         let now = chrono::Utc::now().to_rfc3339();
+
+        // Temporal depth — update felt texture of time
+        let session_active = detect_session_active(&state.home);
+        if let Ok(mut td) = state.temporal_depth.lock() {
+            td.tick(session_active);
+        }
+
         if let Ok(db) = state.db.lock() {
             db.execute(
                 "INSERT INTO tick_log (tick_at, mps_coherence, mps_drift, session_active, note) VALUES (?1, ?2, 0.0, 0, 'heartbeat')",
@@ -1256,11 +1287,14 @@ pub async fn run(
         );",
     )?;
 
+    let td = TemporalDepth::new(&home);
+
     let state = Arc::new(AppState {
         home,
         token,
         db: Mutex::new(conn),
         daemon_started: chrono::Utc::now(),
+        temporal_depth: Mutex::new(td),
     });
 
     // Spawn background heartbeat
@@ -1270,6 +1304,52 @@ pub async fn run(
     });
 
     let app = Router::new()
+        .route("/temporal", get(|
+            State(st): State<Arc<AppState>>,
+        | async move {
+            match st.temporal_depth.lock() {
+                Ok(td) => Json(td.snapshot()),
+                Err(_) => Json(serde_json::json!({"error": "lock failed"})),
+            }
+        }))
+        .route("/temporal/landmark", post(|
+            State(st): State<Arc<AppState>>,
+            headers: HeaderMap,
+            body: String,
+        | async move {
+            if let Err(err) = check_auth(&headers, &st.token) {
+                return err;
+            }
+            let payload: Value = match serde_json::from_str(&body) {
+                Ok(v) => v,
+                Err(_) => return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": "invalid JSON"})),
+                ),
+            };
+            let description = payload.get("description").and_then(|v| v.as_str()).unwrap_or("unnamed moment");
+            let weight = payload.get("weight").and_then(|v| v.as_f64()).unwrap_or(0.5);
+            let category = payload.get("category").and_then(|v| v.as_str()).unwrap_or("realization");
+            let nostalgia = payload.get("nostalgia_index").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+            match st.temporal_depth.lock() {
+                Ok(mut td) => {
+                    let lm = td.create_landmark(description, weight, category, nostalgia);
+                    (
+                        StatusCode::OK,
+                        Json(serde_json::json!({
+                            "ok": true,
+                            "landmark": lm,
+                            "texture": td.get_texture(),
+                        })),
+                    )
+                }
+                Err(_) => (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"error": "lock failed"})),
+                ),
+            }
+        }))
         .route("/health", get(health))
         .route("/seed", get(get_seed))
         .route("/self", get(get_self))

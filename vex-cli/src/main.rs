@@ -2,6 +2,7 @@ mod client;
 mod commands;
 mod monitor;
 mod serve;
+mod temporal_depth;
 mod watch;
 
 use clap::{Parser, Subcommand};
