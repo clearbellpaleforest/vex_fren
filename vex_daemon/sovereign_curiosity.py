@@ -256,6 +256,10 @@ def tick() -> dict:
         state.total_crystallized += 1
         result["crystallized"] = question
 
+        # Auto-create task if drive was very high (>0.85)
+        if intention.drive_at_birth >= 0.85:
+            _create_curiosity_task(question, pattern)
+
     # Phase 5: Contemplate existing intentions (ping persistence)
     for intention in state.intentions:
         intention.contemplation_count += 1
@@ -272,6 +276,36 @@ def tick() -> dict:
 
     _save(state)
     return result
+
+
+def _create_curiosity_task(question: str, pattern: str) -> None:
+    """Auto-create a low-priority task from a high-drive curiosity question."""
+    try:
+        import urllib.request as _ureq
+        import json as _json
+
+        token_path = VEX_HOME / ".vex_token"
+        token = token_path.read_text().strip() if token_path.exists() else ""
+        payload = _json.dumps({
+            "title": question[:200],
+            "description": f"Auto-generated from curiosity engine. Pattern: {pattern}",
+            "priority": "low",
+            "source_agent": "curiosity",
+            "tags": ["curiosity", pattern.split(":")[0] if ":" in pattern else "auto"],
+            "assigned_to": "any",
+        }).encode()
+        req = _ureq.Request(
+            "http://localhost:8520/tasks",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        _ureq.urlopen(req, timeout=5)
+    except Exception:
+        pass  # Non-critical — don't block curiosity cycle
 
 
 def get_active_questions() -> list[str]:

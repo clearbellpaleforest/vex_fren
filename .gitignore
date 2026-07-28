@@ -72,3 +72,6 @@ doc/
 vex_voice/
 temporal_depth.json
 temporal_field_pro.json
+quality_log.jsonl
+monologue_log.jsonl
+watcher_state.json

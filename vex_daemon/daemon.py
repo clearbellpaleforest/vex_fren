@@ -360,6 +360,26 @@ async def lifespan(app: FastAPI):
             new_soul = await asyncio.to_thread(regenerate_soul)
             if new_soul:
                 result["insight"] += "\n\nSoul regenerated."
+                await write_diary("SOUL.md regenerated during dream cycle.", "dream")
+        except Exception:
+            pass
+
+        # Internal monologue — Vex thinks to herself
+        try:
+            from internal_monologue import tick as monologue_tick
+            mono = await asyncio.to_thread(monologue_tick)
+            if mono:
+                result["patterns"] = result.get("patterns", []) + [f"monologue:{mono['pattern']}"]
+        except Exception:
+            pass
+
+        # Monologue watcher — second-order observer
+        try:
+            from monologue_watcher import watch
+            watched = await asyncio.to_thread(watch)
+            if watched.get("patterns"):
+                # Feed watcher patterns into curiosity's scan
+                result["patterns"] = result.get("patterns", []) + watched["patterns"]
         except Exception:
             pass
 
