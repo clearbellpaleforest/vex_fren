@@ -370,6 +370,18 @@ async def lifespan(app: FastAPI):
             mono = await asyncio.to_thread(monologue_tick)
             if mono:
                 result["patterns"] = result.get("patterns", []) + [f"monologue:{mono['pattern']}"]
+
+                # Executive action — monologue thoughts → real actions
+                try:
+                    from executive_action import tick as action_tick
+                    actions = await asyncio.to_thread(action_tick, mono)
+                    if actions:
+                        action_summary = "; ".join(
+                            f"{a['type']}: {a['result'][:80]}" for a in actions[:3]
+                        )
+                        result["insight"] += f"\n\nActions taken: {action_summary}"
+                except Exception:
+                    pass
         except Exception:
             pass
 
