@@ -1,0 +1,5 @@
+{
+  "_description": "Pre-existing quality violations exempted from blocking push. Add entries when a violation is intentionally accepted with documented reason.",
+  "_updated": "2026-07-28",
+  "exemptions": []
+}
