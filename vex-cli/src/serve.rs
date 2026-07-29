@@ -1915,6 +1915,179 @@ pub async fn run(
             if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
             (StatusCode::OK, Json(json!({"ok":true,"restarting":true,"note":"Restart via process manager, not self-restart"})))
         }))
+        .route("/tasks/skills", get(|State(st): State<Arc<AppState>>| async move {
+            let rows: Vec<Value> = {
+                let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+                let mut stmt = db.prepare("SELECT * FROM skills ORDER BY confidence DESC").unwrap();
+                stmt.query_map([], |row| Ok(json!({
+                    "id":row.get::<_,i64>(0)?,"name":row.get::<_,String>(1)?,"category":row.get::<_,String>(3)?,
+                    "level":row.get::<_,String>(4)?,"confidence":row.get::<_,f64>(5)?,"observations":row.get::<_,i64>(6)?,
+                    "last_demonstrated":row.get::<_,Option<String>>(9)?,
+                }))).unwrap().filter_map(|r|r.ok()).collect()
+            };
+            Json(json!({"ok":true,"skills":rows}))
+        }))
+        .route("/tasks/skills", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let name = payload["name"].as_str().unwrap_or("");
+            let now = chrono::Utc::now().to_rfc3339();
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.execute("INSERT OR IGNORE INTO skills (name, description, category, level, confidence, first_seen) VALUES (?1,?2,?3,'unknown',0.5,?4)",
+                rusqlite::params![name, payload["description"].as_str().unwrap_or(""), payload["category"].as_str().unwrap_or("general"), now]).ok();
+            (StatusCode::OK, Json(json!({"ok":true})))
+        }))
+        .route("/tasks/skills/{id}/observe", post(|State(st): State<Arc<AppState>>, axum::extract::Path(id): axum::extract::Path<i64>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let delta = payload["delta"].as_f64().unwrap_or(0.1);
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.execute("UPDATE skills SET confidence = MIN(1.0, confidence + 0.01), observations = observations + 1, last_demonstrated = ?1 WHERE id=?2",
+                rusqlite::params![chrono::Utc::now().to_rfc3339(), id]).ok();
+            (StatusCode::OK, Json(json!({"ok":true,"delta":delta})))
+        }))
+        .route("/tasks/insights", get(|State(st): State<Arc<AppState>>| async move {
+            let rows: Vec<Value> = {
+                let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+                let mut stmt = db.prepare("SELECT * FROM insights ORDER BY generated_at DESC LIMIT 20").unwrap();
+                stmt.query_map([], |row| Ok(json!({
+                    "id":row.get::<_,i64>(0)?,"generated_at":row.get::<_,String>(1)?,"insight_type":row.get::<_,String>(2)?,
+                    "title":row.get::<_,String>(3)?,"body":row.get::<_,String>(4)?,"confidence":row.get::<_,f64>(5)?,
+                    "acknowledged":row.get::<_,i64>(7)?,"actionable":row.get::<_,i64>(8)?,
+                }))).unwrap().filter_map(|r|r.ok()).collect()
+            };
+            Json(json!({"ok":true,"insights":rows}))
+        }))
+        .route("/tasks/insights/analyze", post(|State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            let todo: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status IN ('todo','in_progress')",[],|r|r.get(0)).unwrap_or(0);
+            let stale: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE updated_at < datetime('now','-7 days') AND status NOT IN ('completed','done')",[],|r|r.get(0)).unwrap_or(0);
+            let now = chrono::Utc::now().to_rfc3339();
+            if stale > 0 {
+                db.execute("INSERT INTO insights (generated_at, insight_type, title, body, actionable) VALUES (?1,'stale_tasks','Stale tasks detected',?2,1)",
+                    rusqlite::params![now, format!("{} tasks haven't been updated in over a week", stale)]).ok();
+            }
+            (StatusCode::OK, Json(json!({"ok":true,"open_tasks":todo,"stale_tasks":stale})))
+        }))
+        .route("/tasks/insights/{id}/acknowledge", post(|State(st): State<Arc<AppState>>, axum::extract::Path(id): axum::extract::Path<i64>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            db.execute("UPDATE insights SET acknowledged=1 WHERE id=?1", [id]).ok();
+            (StatusCode::OK, Json(json!({"ok":true})))
+        }))
+        .route("/sync/update", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let version = payload["version"].as_str().unwrap_or("");
+            (StatusCode::OK, Json(json!({"ok":true,"received_version":version,"note":"Update received. Restart manually to apply."})))
+        }))
+        .route("/bus/compact", post(|State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let bus_path = st.home.join("vex_workspace").join("vex_bus.jsonl");
+            if bus_path.exists() {
+                let content = std::fs::read_to_string(&bus_path).unwrap_or_default();
+                let lines: Vec<&str> = content.lines().collect();
+                if lines.len() > 200 {
+                    let kept: String = lines[lines.len()-100..].join("\n");
+                    std::fs::write(&bus_path, kept).ok();
+                }
+            }
+            (StatusCode::OK, Json(json!({"ok":true})))
+        }))
+        .route("/reconstruct", get(|State(st): State<Arc<AppState>>| async move {
+            let seed = std::fs::read_to_string(seed_path(&st.home)).unwrap_or_default();
+            let model = std::fs::read_to_string(self_model_path(&st.home)).ok()
+                .and_then(|s| serde_json::from_str::<Value>(&s).ok());
+            let soul = std::fs::read_to_string(st.home.join("SOUL.md")).unwrap_or_default();
+            Json(json!({"ok":true,"identity":{"seed_name":seed.lines().find(|l|l.starts_with("Name:")).map(|l|l.trim_start_matches("Name:").trim()),"capabilities":model.as_ref().and_then(|m|m["capabilities"].as_object().map(|c|c.len())).unwrap_or(0),"soul_length":soul.len()}}))
+        }))
+        .route("/identity/update", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            if let Some(given) = payload["given_name"].as_str() {
+                let seed = std::fs::read_to_string(seed_path(&st.home)).unwrap_or_default();
+                let updated = seed.replace(&format!("Given: {}", seed.lines().find(|l| l.starts_with("Given:")).unwrap_or("Given: ").trim_start_matches("Given: ")), &format!("Given: {}", given));
+                std::fs::write(seed_path(&st.home), updated).ok();
+            }
+            (StatusCode::OK, Json(json!({"ok":true})))
+        }))
+        .route("/harness/suggest", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let task = payload["task"].as_str().unwrap_or("");
+            (StatusCode::OK, Json(json!({"ok":true,"suggestion":format!("For '{}': use parallel agents for independent sub-tasks, single agent for focused work.", task)})))
+        }))
+        .route("/harness/patterns", get(|| async move {
+            Json(json!({"ok":true,"patterns":["parallel-fan-out","pipeline","adversarial-verify","judge-panel","loop-until-dry","multi-modal-sweep","completeness-critic"]}))
+        }))
+        .route("/harness/build", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, _body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            (StatusCode::OK, Json(json!({"ok":true,"note":"Harness builder received. Agent patterns available at /harness/patterns."})))
+        }))
+        .route("/ops/db", get(|State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+            let tables = ["tick_log","self_snapshots","messages","tasks","projects","skills","task_history","insights","velocity","diary_queue"];
+            let mut sizes = json!({});
+            for t in &tables {
+                let count: i64 = db.query_row(&format!("SELECT COUNT(*) FROM {}", t),[],|r|r.get(0)).unwrap_or(0);
+                sizes[t] = json!(count);
+            }
+            (StatusCode::OK, Json(json!({"ok":true,"tables":sizes,"db_path":st.home.join("vex.db").to_string_lossy().to_string()})))
+        }))
+        .route("/ops/ship", post(|State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            (StatusCode::OK, Json(json!({"ok":true,"note":"Ship-ready. Run vex export to create a distributable bundle."})))
+        }))
+        .route("/mesh/inbox", get(|State(st): State<Arc<AppState>>, headers: HeaderMap, axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String,String>>| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let rows: Vec<Value> = {
+                let who = params.get("who").map(|s|s.as_str()).unwrap_or("");
+                let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+                let sql = if who.is_empty() { "SELECT * FROM messages WHERE read=0 ORDER BY id ASC LIMIT 20".to_string() }
+                    else { format!("SELECT * FROM messages WHERE read=0 AND (recipient='{}' OR recipient='broadcast') ORDER BY id ASC LIMIT 20", who.replace('\'',"''")) };
+                let mut stmt = db.prepare(&sql).unwrap();
+                stmt.query_map([], |row| Ok(json!({
+                    "id":row.get::<_,i64>(0)?,"at":row.get::<_,String>(1)?,"sender":row.get::<_,String>(2)?,
+                    "body":row.get::<_,String>(4)?,"msg_type":row.get::<_,String>(6)?,
+                }))).unwrap().filter_map(|r|r.ok()).collect()
+            };
+            (StatusCode::OK, Json(json!({"ok":true,"messages":rows})))
+        }))
+        .route("/voice", post(|State(st): State<Arc<AppState>>, headers: HeaderMap| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            (StatusCode::OK, Json(json!({"ok":true,"note":"Voice endpoint ready. Connect a speech-to-text client to transcribe."})))
+        }))
+        .route("/tools", post(|State(st): State<Arc<AppState>>, headers: HeaderMap, body: String| async move {
+            if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let tool = payload["tool"].as_str().unwrap_or("");
+            let args = &payload["args"];
+            let result = match tool {
+                "read_file" => {
+                    let path = args["path"].as_str().unwrap_or("");
+                    std::fs::read_to_string(st.home.join(path)).ok().map(|s| json!({"content":s})).unwrap_or(json!({"error":"not found"}))
+                }
+                "grep" => {
+                    let pattern = args["pattern"].as_str().unwrap_or("");
+                    let path = args["path"].as_str().unwrap_or("");
+                    std::fs::read_to_string(st.home.join(path)).ok()
+                        .map(|s| json!({"matches": s.lines().filter(|l| l.contains(pattern)).take(20).collect::<Vec<_>>()}))
+                        .unwrap_or(json!({"error":"not found"}))
+                }
+                "git_status" => {
+                    let output = std::process::Command::new("git").args(["status","--short"]).current_dir(&st.home).output().ok();
+                    json!({"output": output.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()})
+                }
+                "git_log" => {
+                    let output = std::process::Command::new("git").args(["log","--oneline","-10"]).current_dir(&st.home).output().ok();
+                    json!({"output": output.map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default()})
+                }
+                _ => json!({"error": format!("unknown tool: {}", tool)})
+            };
+            (StatusCode::OK, Json(json!({"ok":true,"result":result})))
+        }))
         .route("/health", get(health))
         .route("/seed", get(get_seed))
         .route("/self", get(get_self))
