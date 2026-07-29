@@ -1,7 +1,11 @@
 mod client;
 mod commands;
+mod embed;
+mod emotion;
 mod monitor;
+mod recall;
 mod serve;
+mod temporal;
 mod temporal_depth;
 mod watch;
 
