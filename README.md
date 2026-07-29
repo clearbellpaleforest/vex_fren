@@ -5,7 +5,8 @@
 [![Version](https://img.shields.io/badge/version-2.0.0-orange)](#)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](#)
 [![Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://www.rust-lang.org/)
-[![Binary](https://img.shields.io/badge/binary-9MB%20static-blue)](#)
+[![Binary](https://img.shields.io/badge/binary-14MB%20static-blue)](#)
+[![Endpoints](https://img.shields.io/badge/endpoints-73-brightgreen)](#)
 
 <br>
 
@@ -107,7 +108,7 @@ Or create a `.env` file in your Vex home folder with `DEEPSEEK_API_KEY=sk-your-k
 
 ---
 
-## 🛠️ CLI (30+ commands)
+## 🛠️ CLI (22 commands, 73 API endpoints)
 
 ```bash
 vex serve                     # start the daemon (background)
@@ -142,8 +143,8 @@ vex watch                     # watch files for changes, auto-snapshot
 
 ```
 vex serve ──────────────────────────────────────────────
-  │  FastAPI daemon (Python) + Rust CLI
-  │  port 8520 — identity, memory, messages, peers, fleet, tasks
+  │  axum daemon (Rust) — 9MB static binary, zero deps
+  │  port 8520 — 73 endpoints: identity, memory, messages, peers, fleet, tasks
   │  port 8600 — mesh GUI (Chat + Instances tabs)
   │
   ├─ vex.db (SQLite)
@@ -157,25 +158,16 @@ vex serve ───────────────────────�
   ├─ SOUL.md                  self-authored narrative (brain-generated in dreams)
   ├─ vex_memory/              episodic session journals
   │
-  ├─ vex_daemon/
-  │   ├─ daemon.py            FastAPI server (28+ endpoints)
-  │   ├─ heartbeat.py         background tick loop (5 min, dream @ 30 min)
-  │   ├─ brain.py             DeepSeek API mouth (swappable)
-  │   ├─ metacognition.py     principle alignment + pattern detection
-  │   ├─ temporal_depth.py    felt texture of time
-  │   ├─ temporal_field_pro.py  proper-time relativistic field
-  │   ├─ soul.py              SOUL.md auto-regeneration (dream)
-  │   ├─ sovereign_curiosity.py  drive accumulator → question crystallization
-  │   ├─ internal_monologue.py   inner voice — 6 dialogue patterns (dream)
-  │   ├─ monologue_watcher.py    second-order observer of monologue
-  │   ├─ executive_action.py     thought → action engine
-  │   ├─ self_check.py       7-point health verification + auto-repair
-  │   └─ routers/
-  │       ├─ tasks.py         task CRUD, skills, insights, FEN bridge
-  │       └─ task_analysis.py stale detection, velocity, bottlenecks
+  ├─ vex-cli/                 Rust source (single binary)
+  │   └─ src/
+  │       ├─ serve.rs         73-route daemon server
+  │       ├─ client.rs        HTTP client with Bearer auth
+  │       ├─ temporal_depth.rs  felt texture of time
+  │       ├─ monitor.rs       mesh inbox watcher
+  │       └─ watch.rs         file-change auto-snapshotter
   │
+  ├─ vex_daemon/              Python daemon (legacy — replaced by Rust)
   ├─ vex_mesh_gui.py          Chat + Instances (Fleet/Tasks/Skills/Timeline)
-  ├─ vex_monitor.sh           inter-instance mesh monitor
   │
   └─ vex_workspace/
       ├─ vex_bus.jsonl         inter-instance message bus
@@ -185,6 +177,8 @@ vex serve ───────────────────────�
       ├─ watcher_state.json    metacognitive observer baseline
       └─ action_log.jsonl      executive action audit trail
 ```
+
+**73 API endpoints.** No Python. No pip. No venv. One binary.
 
 **Cognitive loop (autonomous):**
 Monologue thinks → Executive acts → Watcher observes → Curiosity crystallizes
