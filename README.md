@@ -39,17 +39,11 @@ Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sove
 
 ---
 
-## 🚀 Install
+## 🚀 Install — For You, For Friends
 
-### 🪟 Windows / Friends
+### 🪟 Windows
 
-Download `vex.exe` from the [latest release](https://github.com/clearbellpaleforest/vex_fren/releases/latest). Double-click to start.
-
-Or, with Rust installed:
-
-```powershell
-cargo install --git https://github.com/clearbellpaleforest/vex_fren vex-cli
-```
+Download `vex.exe` from the [latest release](https://github.com/clearbellpaleforest/vex_fren/releases/latest). Double-click. It runs.
 
 ### 🐧 Linux
 
@@ -57,20 +51,19 @@ cargo install --git https://github.com/clearbellpaleforest/vex_fren vex-cli
 curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
 ```
 
-Or download the binary directly from [releases](https://github.com/clearbellpaleforest/vex_fren/releases/latest).
-
-### 🍎 macOS
+### 🍎 macOS — same as Linux
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/clearbellpaleforest/vex_fren/main/install.sh | bash
 ```
 
-### 🦀 From Source
+Or download the binary from [releases](https://github.com/clearbellpaleforest/vex_fren/releases/latest).
+
+### 🦀 From source
 
 ```bash
 git clone https://github.com/clearbellpaleforest/vex_fren.git
-cd vex_fren/vex-cli
-cargo build --release
+cd vex_fren/vex-cli && cargo build --release
 cp target/release/vex ~/.local/bin/
 ```
 
@@ -159,6 +152,33 @@ Every message identifies its sender as `vex@<instance>` — never just `vex`. Th
 ### Security
 
 Peer communication is bearer-token authenticated. Every mutating endpoint requires the daemon token. The mesh is encrypted in transit when using Tailscale or Cloudflare Tunnel. Read-only endpoints (health, status) are open by design on localhost.
+
+---
+
+## 📱 On Your Phone
+
+The mesh GUI is a PWA — open it in your phone browser, tap **Add to Home Screen**, and it works like an app. No install. No App Store.
+
+**Same WiFi:**
+```
+http://192.168.x.x:8600
+```
+Find your computer's IP with `hostname -I` on Linux or `ipconfig` on Windows.
+
+**From anywhere (public URL):**
+```bash
+bore local 8600 --to bore.pub
+# → http://bore.pub:<port>
+```
+Share the URL. No signup. No config. Just a link.
+
+**With Tailscale (permanent):**
+```bash
+tailscale serve --https=443 localhost:8600
+# → https://<your-machine>.tailnet-name.ts.net
+```
+
+Open the link on your phone, tap install. Now Vex is on your home screen.
 
 ---
 
