@@ -12,6 +12,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::emotion::detect_emotion;
+use crate::embed;
+use crate::recall;
+
 use crate::temporal_depth::TemporalDepth;
 
 // ── Shared state ────────────────────────────────────────────────
@@ -287,6 +291,72 @@ async fn get_memory_recent(State(state): State<Arc<AppState>>) -> Json<Value> {
     Json(Value::Array(entries))
 }
 
+// ── Semantic memory search ─────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct SearchQuery {
+    q: String,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+fn default_limit() -> usize { 5 }
+
+async fn get_memory_search(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
+) -> Json<Value> {
+    if query.q.is_empty() {
+        return Json(serde_json::json!({"results": [], "fallback": false}));
+    }
+
+    // Collect all memory candidates from SQLite embeddings table
+    let candidates: Vec<(String, String, String, Option<String>, String)> = {
+        let conn = state.db.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT date, summary, full_text, embedding, emotion FROM memory_embeddings ORDER BY date DESC LIMIT 200"
+        ).unwrap();
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        }).unwrap().filter_map(|r| r.ok()).collect()
+    };
+
+    if candidates.is_empty() {
+        return Json(serde_json::json!({"results": [], "fallback": false, "note": "no embeddings yet — write some memories first"}));
+    }
+
+    // Use semantic recall if embeddings are available, otherwise keyword fallback
+    let embeddings_available = candidates.iter().any(|(_, _, _, emb, _)| emb.is_some());
+    let results = if embeddings_available {
+        recall::recall(&query.q, candidates).await
+    } else {
+        recall::keyword_recall(&query.q, candidates)
+    };
+
+    let output: Vec<Value> = results.into_iter().take(query.limit).map(|r| {
+        serde_json::json!({
+            "date": r.date,
+            "summary": r.summary,
+            "entry": r.entry,
+            "score": (r.score * 1000.0).round() / 1000.0,
+            "emotion": r.emotion,
+            "matched_emotion": r.matched_emotion,
+            "in_time_range": r.in_time_range,
+        })
+    }).collect();
+
+    Json(serde_json::json!({
+        "results": output,
+        "fallback": !embeddings_available,
+        "query": query.q,
+    }))
+}
+
 // ── Write endpoints (auth required) ─────────────────────────────
 
 async fn post_diary(
@@ -366,6 +436,24 @@ async fn post_memory(
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(serde_json::json!({"ok": false, "error": "write failed"})),
     ))?;
+
+    // Background: generate embedding + emotion tag
+    let summary = record["summary"].as_str().unwrap_or("").to_string();
+    let today_bg = today.clone();
+    let state_bg = state.clone();
+    tokio::spawn(async move {
+        let emotion = detect_emotion(&summary);
+        let full_text = format!("{}: {}", today_bg, summary);
+        let embedding = embed::embed_text(&full_text).await;
+        let emb_json = embedding.as_ref().map(|v| embed::encode_embedding(v));
+
+        if let Ok(conn) = state_bg.db.lock() {
+            let _ = conn.execute(
+                "INSERT INTO memory_embeddings (date, summary, full_text, emotion, embedding) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![today_bg, summary, full_text, emotion.as_str(), emb_json],
+            );
+        }
+    });
 
     Ok(Json(serde_json::json!({
         "ok": true,
@@ -1367,6 +1455,16 @@ pub async fn run(
         CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
         CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
         CREATE INDEX IF NOT EXISTS idx_task_history_task ON task_history(task_id);
+        CREATE TABLE IF NOT EXISTS memory_embeddings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            full_text TEXT NOT NULL,
+            emotion TEXT DEFAULT 'neutral',
+            embedding TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_memory_embeddings_date ON memory_embeddings(date);
         CREATE TABLE IF NOT EXISTS diary_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -2092,6 +2190,7 @@ pub async fn run(
         .route("/seed", get(get_seed))
         .route("/self", get(get_self))
         .route("/memory/recent", get(get_memory_recent))
+        .route("/memory/semantic", get(get_memory_search))
         .route("/diary", post(post_diary))
         .route("/memory", post(post_memory))
         .route("/self/update", post(post_self_update))

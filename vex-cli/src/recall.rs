@@ -11,7 +11,7 @@ use crate::embed::{self, cosine_similarity, decode_embedding, EMBED_DIMS};
 use crate::emotion::{query_emotions, Emotion};
 use crate::temporal::{DateRange, parse_temporal};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 
 /// A scored memory entry returned by recall.
 #[derive(Debug, Clone, Serialize, Deserialize)]
