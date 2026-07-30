@@ -41,7 +41,7 @@ Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sove
 
 ## 🚀 Install
 
-### 🪟 Windows
+### 🪟 Windows / Friends
 
 Download `vex.exe` from the [latest release](https://github.com/clearbellpaleforest/vex_fren/releases/latest). Double-click to start.
 
