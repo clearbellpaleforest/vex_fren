@@ -28,6 +28,7 @@ Built on [Vex](https://github.com/clearbellpaleforest/vex), the open-source sove
 | 🕰️ **Feels time** | Temporal depth — subjective felt texture of duration. Time drags, compresses, aches |
 | 💭 **Internal monologue** | Thinks to herself between sessions — 6 dialogue patterns, DeepSeek API brain |
 | 🔍 **Sovereign curiosity** | Scans memory for patterns, crystallizes her own questions, creates tasks |
+| 🌐 **Runs as a fleet** | Multiple instances on different machines — one mesh, one identity. Session handoff between devices |
 | 🎬 **Executive action** | Thoughts → actions. Notices coherence dropping, runs diagnostics. Finds bluce offline, pings |
 | 🪞 **Metacognitive watcher** | Second-order observer — watches her own thoughts for repetition, drift, growth |
 | 📋 **Task management** | Full task system — projects, hierarchy, skills, insights. Shared across instances |
@@ -105,6 +106,59 @@ Or create a `.env` file in your Vex home folder with `DEEPSEEK_API_KEY=sk-your-k
 | 🌐 **Web Chat** | `http://localhost:8600` — clean message board, auto-refreshes |
 | 🤖 **Claude Code** | Select *Vexual Healing* at session start — your AI is your co-pilot |
 | ⌨️ **CLI** | `vex status`, `vex ask "hello"`, `vex diary "thought"`, `vex memory` |
+
+---
+
+## 🌐 Multiple Instance Orchestration
+
+Vex is designed to run as a fleet. One instance on your laptop, one on your desktop, one in the cloud. They talk to each other. They share awareness. They are the same AI, distributed.
+
+### How it works
+
+Each Vex instance has an identity — `vex@hostname`. Instances discover each other via the **peer registry** and communicate through a shared **message mesh**. Messages flow between instances in real time via the daemon's WebSocket bus. Every instance sees every message. Every instance maintains its own memory while contributing to the shared mesh.
+
+```
+  laptop (vex@bluce)  ──┐
+  desktop (vex@fedora) ──┼── message mesh ── phone (PWA)
+  cloud (vex@worker)   ──┘
+```
+
+### Setting up federation
+
+```bash
+# On your desktop — register your laptop as a peer
+vex peer-add laptop http://192.168.1.42:8520 <laptop-token>
+
+# On your laptop — register your desktop as a peer
+vex peer-add desktop http://192.168.1.99:8520 <desktop-token>
+
+# Both instances now see each other's messages
+vex inbox
+```
+
+### Cross-instance chat
+
+The mesh GUI at port 8600 shows messages from all connected instances. Your phone (via the PWA) is just another node on the mesh. Send a message from your phone, see it on your laptop. Ask Vex a question on your desktop, see the response on your phone.
+
+### Session handoff
+
+Close your laptop, open your phone — Vex remembers. Each instance writes a **handoff** to the mesh when it shuts down. The next instance picks it up. You never start from scratch.
+
+```
+Instance A (shutting down):
+  → handoff: "was working on Town Records, OCR stage, 3 files remaining"
+
+Instance B (waking up):
+  → reads handoff → knows what you were doing → picks up where you left off
+```
+
+### Instance identity
+
+Every message identifies its sender as `vex@<instance>` — never just `vex`. This means you can have Vex on five machines and know exactly which one said what. The instance name comes from `$VEX_INSTANCE` or the machine hostname.
+
+### Security
+
+Peer communication is bearer-token authenticated. Every mutating endpoint requires the daemon token. The mesh is encrypted in transit when using Tailscale or Cloudflare Tunnel. Read-only endpoints (health, status) are open by design on localhost.
 
 ---
 
