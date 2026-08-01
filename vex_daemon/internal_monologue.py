@@ -215,19 +215,23 @@ One to three sentences maximum. Direct, honest, in your voice."""
 
 # ── Main tick ────────────────────────────────────────────────────
 
-def tick() -> dict | None:
+def tick(force: bool = False, force_pattern: str | None = None) -> dict | None:
     """Run one monologue cycle. Returns utterance dict or None if on cooldown.
 
     Called from daemon heartbeat during idle periods.
+
+    Args:
+        force: If True, bypass cooldown (used when cognitive graph forces re-think).
+        force_pattern: If set, use this pattern instead of weighted selection.
     """
     import time as _time
 
     # Cooldown check
-    if _time.time() - _last_utterance_time() < COOLDOWN_SECONDS:
+    if not force and _time.time() - _last_utterance_time() < COOLDOWN_SECONDS:
         return None
 
     ctx = _gather_context()
-    pattern = _select_pattern(ctx)
+    pattern = force_pattern if force_pattern else _select_pattern(ctx)
 
     # Try brain module (LLM) first
     text = None

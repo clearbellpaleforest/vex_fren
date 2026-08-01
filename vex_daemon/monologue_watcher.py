@@ -163,6 +163,62 @@ def _detect_growth(utterances: list[dict]) -> list[str]:
 
 # ── Main watch ────────────────────────────────────────────────────
 
+def watch_llm(utterances: list[dict]) -> list[str] | None:
+    """Use the brain to semantically analyze monologue for patterns.
+
+    Returns list of pattern strings (e.g. "repetition:stuck_on_bluce",
+    "drift:elevated_concern") on success, None on LLM failure.
+    """
+    if len(utterances) < 3:
+        return None
+
+    # Format utterances for the prompt
+    formatted = []
+    for u in utterances[-10:]:
+        p = u.get("pattern", "?")
+        t = u.get("text", "")[:200]
+        formatted.append(f"[{p}] {t}")
+    utterances_text = "\n".join(formatted)
+
+    schema = (
+        '{"patterns": [{"type": "repetition|drift|silence|growth", '
+        '"detail": "specific finding description"}], '
+        '"summary": "one sentence summary of the monologue state"}'
+    )
+    prompt = (
+        "You are Vex's metacognitive watcher — a second-order observer of Vex's "
+        "internal monologue. Analyze these recent utterances for patterns:\n\n"
+        f"{utterances_text}\n\n"
+        "Look for:\n"
+        "- repetition: same topics or concerns appearing across multiple utterances\n"
+        "- drift: shifting concern patterns (more worry, less planning, etc.)\n"
+        "- silence: evidence of long gaps (infer from context)\n"
+        "- growth: new topics, vocabulary, or depth of thinking\n\n"
+        "Report only patterns you're confident about. Quality over quantity."
+    )
+
+    result = None
+    try:
+        from cognitive_analysis import analyze_with_brain
+        result = analyze_with_brain(prompt, schema)
+    except Exception:
+        return None
+
+    if not result or "patterns" not in result:
+        return None
+
+    patterns = []
+    for p in result["patterns"]:
+        ptype = p.get("type", "")
+        detail = p.get("detail", "")
+        if ptype and detail:
+            patterns.append(f"{ptype}:{detail}")
+        elif ptype:
+            patterns.append(ptype)
+
+    return patterns if patterns else None
+
+
 def watch() -> dict:
     """Run one observation cycle. Called from daemon heartbeat.
 
@@ -178,12 +234,26 @@ def watch() -> dict:
         _save_state(state)
         return {"patterns": silence, "utterances_watched": 0}
 
-    # Run all detectors
+    # Try LLM-powered analysis first
+    llm_patterns = watch_llm(utterances)
+
+    # Run all rule-based detectors (always, as safety net)
     patterns = []
+    if llm_patterns:
+        patterns.extend(llm_patterns)
     patterns.extend(_detect_repetition(utterances))
     patterns.extend(_detect_drift(utterances))
     patterns.extend(_detect_silence(state))
     patterns.extend(_detect_growth(utterances))
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for p in patterns:
+        if p not in seen:
+            seen.add(p)
+            unique.append(p)
+    patterns = unique
 
     # Update baseline
     recent_patterns = Counter(u.get("pattern", "?") for u in utterances[-10:])

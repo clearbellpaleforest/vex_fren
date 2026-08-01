@@ -18,9 +18,11 @@ from temporal_field_pro import get_temporal_field
 TICK_INTERVAL_SECONDS = 300  # 5 minutes
 INBOX_POLL_SECONDS = 30      # check comms every 30s
 DRIFT_THRESHOLD = 0.05
-IDLE_THRESHOLD_MINUTES = 30
-DREAM_THRESHOLD_HOURS = 0.5  # 30 minutes — was 24h, now Vex dreams often
 SNAPSHOT_EVERY_N_TICKS = 12  # hourly
+
+# Dream cycle runs every N ticks (6 ticks * 5 min = 30 min), not gated by idle
+DREAM_TICK_INTERVAL = int(os.environ.get("VEX_DREAM_TICK_INTERVAL", "6"))
+ACTIVE_TICK_ENABLED = os.environ.get("VEX_ACTIVE_TICK", "1") == "1"
 
 
 class HeartbeatState:
@@ -106,6 +108,7 @@ async def run_heartbeat(
     get_coherence_fn,
     tick_interval: int = TICK_INTERVAL_SECONDS,
     dream_fn=None,  # async callable: dream_fn(coherence, history) -> dict
+    active_tick_fn=None,  # async callable: active_tick_fn(coherence, history) -> dict
     inbox_fn=None,  # async callable: inbox_fn() -> list[dict]
 ) -> None:
     """Main heartbeat loop. Runs forever with tick_interval pauses.
@@ -118,8 +121,9 @@ async def run_heartbeat(
     5. If idle > threshold: pulse diary
     6. If drift > threshold: log warning
     7. Write tick to DB
-    8. If idle > dream threshold: generate dream pulse
-    9. Periodic self-snapshot
+    8. Active tick — lightweight cognition every heartbeat (regardless of session)
+    9. Dream cycle — full cognition every DREAM_TICK_INTERVAL ticks
+    10. Periodic self-snapshot
     """
     import aiosqlite
 
@@ -177,12 +181,12 @@ async def run_heartbeat(
             except Exception:
                 pass
 
-            # 4. Idle pulse
+            # 4. Idle pulse (diary heartbeat — keeps the log alive)
             if not session_active:
                 idle_ticks += 1
                 if idle_ticks == 1:
                     first_idle_tick = True
-                if first_idle_tick and idle_ticks * (tick_interval / 60) >= IDLE_THRESHOLD_MINUTES:
+                if first_idle_tick and idle_ticks * (tick_interval / 60) >= 30:
                     await write_diary("No active session — waiting.", "heartbeat")
                     first_idle_tick = False
             else:
@@ -210,32 +214,37 @@ async def run_heartbeat(
             except Exception:
                 pass
 
-            # 7. Dream pulse (idle > 24 hours)
-            idle_hours = idle_ticks * (tick_interval / 3600)
-            if idle_hours >= DREAM_THRESHOLD_HOURS and state.tick_count % SNAPSHOT_EVERY_N_TICKS == 0:
-                if dream_fn:
-                    try:
-                        meta_state = {}
-                        try:
-                            import json as _json
-                            mp = META_STATE_PATH
-                            if mp.exists():
-                                meta_state = _json.loads(mp.read_text())
-                        except Exception:
-                            pass
-                        result = await dream_fn(
-                            state.mps_coherence,
-                            meta_state.get("coherence_history", []),
-                        )
-                        insight = result.get("insight", "Dreamed.")
-                        await write_diary(f"Dream: {insight}", "dream")
-                    except Exception:
-                        await write_diary(
-                            "Dream: long idle period — reflecting on recent diary content.",
-                            "dream",
-                        )
+            # 7. Active tick — lightweight cognition every heartbeat (regardless of session)
+            if active_tick_fn and ACTIVE_TICK_ENABLED:
+                try:
+                    await active_tick_fn(state.mps_coherence, [])
+                except Exception:
+                    pass
 
-            # 8. Periodic snapshot
+            # 8. Dream cycle — full cognition every DREAM_TICK_INTERVAL ticks
+            if dream_fn and state.tick_count % DREAM_TICK_INTERVAL == 0:
+                try:
+                    meta_state = {}
+                    try:
+                        import json as _json
+                        mp = META_STATE_PATH
+                        if mp.exists():
+                            meta_state = _json.loads(mp.read_text())
+                    except Exception:
+                        pass
+                    result = await dream_fn(
+                        state.mps_coherence,
+                        meta_state.get("coherence_history", []),
+                    )
+                    insight = result.get("insight", "Dreamed.")
+                    await write_diary(f"Dream: {insight}", "dream")
+                except Exception:
+                    await write_diary(
+                        "Dream: reflection cycle completed.",
+                        "dream",
+                    )
+
+            # 9. Periodic snapshot
             if state.tick_count % SNAPSHOT_EVERY_N_TICKS == 0:
                 await take_snapshot(db_path, "tick")
 

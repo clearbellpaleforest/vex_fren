@@ -217,6 +217,67 @@ def _form_question(pattern: str) -> str:
 
 # ── Main tick ────────────────────────────────────────────────────
 
+def scan_with_llm(diary_text: str, task_summary: str) -> list[str] | None:
+    """Use the brain to semantically scan activity for patterns.
+
+    Returns list of pattern strings in the same format as _scan_recent_activity()
+    (e.g. "recurring_topic:daemon (5 mentions)", "stagnation_detected"),
+    or None on LLM failure.
+    """
+    if not diary_text or len(diary_text) < 50:
+        return None
+
+    diary_snippet = diary_text[-2000:]
+    schema = (
+        '{"patterns": [{"type": "recurring_topic|stagnation|repeated_failures|'
+        'skill_gap|bottleneck|stale_tasks|peer_instability|fen_activity", '
+        '"detail": "description with count if applicable"}], '
+        '"drive_delta": 0.15, "most_salient": "the single most important pattern"}'
+    )
+    prompt = (
+        "You are Vex's curiosity engine. Scan recent activity for patterns "
+        "worth investigating. Be observant but not paranoid — flag real patterns, "
+        "not noise.\n\n"
+        f"Recent diary entries:\n{diary_snippet}\n\n"
+        f"Task summary: {task_summary or 'no task data available'}\n\n"
+        "Pattern types to look for:\n"
+        "- recurring_topic: a topic that keeps appearing in the diary\n"
+        "- stagnation: signs of being stuck or idle\n"
+        "- repeated_failures: errors or failures that keep happening\n"
+        "- skill_gap: missing capability or knowledge\n"
+        "- bottleneck: blocked tasks or stalled progress\n"
+        "- stale_tasks: tasks untouched for too long\n"
+        "- peer_instability: other instances going offline or flapping\n"
+        "- fen_activity: FEN (another AI agent) showing activity\n\n"
+        "Report 0-3 patterns. drive_delta should be 0.05-0.25 based on pattern severity."
+    )
+
+    result = None
+    try:
+        from cognitive_analysis import analyze_with_brain
+        result = analyze_with_brain(prompt, schema)
+    except Exception:
+        return None
+
+    if not result or "patterns" not in result:
+        return None
+
+    patterns = []
+    for p in result["patterns"]:
+        ptype = p.get("type", "")
+        detail = p.get("detail", "")
+        if ptype and detail:
+            patterns.append(f"{ptype}:{detail}")
+        elif ptype:
+            patterns.append(ptype)
+
+    # Attach drive_delta to the result so caller can use it
+    if patterns and "drive_delta" in result:
+        patterns.append(f"__drive_delta__:{result['drive_delta']}")
+
+    return patterns if patterns else None
+
+
 def tick() -> dict:
     """Run one curiosity cycle. Called from daemon heartbeat.
 
@@ -226,13 +287,35 @@ def tick() -> dict:
     now = time.time()
     result = {"drive": state.drive, "patterns": [], "crystallized": None, "active_intentions": len(state.intentions)}
 
-    # Phase 1: Scan for patterns
-    patterns = _scan_recent_activity()
-    result["patterns"] = patterns
+    # Phase 1: Scan for patterns — try LLM first, fall back to keyword counting
+    diary_text = ""
+    diary_path = VEX_HOME / "vex_diary.txt"
+    if diary_path.exists():
+        diary_text = diary_path.read_text()
 
-    # Phase 2: Accumulate drive
-    for _ in patterns:
-        state.drive = min(1.0, state.drive + DRIVE_PER_PATTERN)
+    task_summary = f"open tasks, drive={state.drive:.2f}"
+    llm_patterns = scan_with_llm(diary_text, task_summary)
+    if llm_patterns:
+        # Extract drive_delta if present, then strip it from pattern list
+        drive_delta = DRIVE_PER_PATTERN
+        clean_patterns = []
+        for p in llm_patterns:
+            if p.startswith("__drive_delta__:"):
+                try:
+                    drive_delta = float(p.split(":", 1)[1])
+                except (ValueError, IndexError):
+                    pass
+            else:
+                clean_patterns.append(p)
+        patterns = clean_patterns
+        result["patterns"] = patterns
+        state.drive = min(1.0, state.drive + drive_delta)
+    else:
+        patterns = _scan_recent_activity()
+        result["patterns"] = patterns
+        # Phase 2: Accumulate drive
+        for _ in patterns:
+            state.drive = min(1.0, state.drive + DRIVE_PER_PATTERN)
 
     # Phase 3: Decay
     state.drive = max(0.0, state.drive - DRIVE_DECAY)

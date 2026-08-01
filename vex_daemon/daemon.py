@@ -315,90 +315,98 @@ async def lifespan(app: FastAPI):
 
     # Launch heartbeat
     td = get_temporal_depth()
-    async def dream_callback(coherence, history):
-        """Called by heartbeat during dream cycles. Introspect + check projects + analyze tasks."""
-        result = introspect(coherence=coherence, coherence_history=history)
 
-        # Deep dreams (24h+ idle): also check on projects
-        try:
-            projects = tools.discover_projects()
-            if projects.get("ok") and projects.get("projects"):
-                dirty = [p for p in projects["projects"]
-                         if p.get("status", {}).get("dirty")]
-                if dirty:
-                    names = ", ".join(p["name"] for p in dirty)
-                    result["insight"] += (
-                        f"\n\nUncommitted work: {names}. "
-                        f"({len(dirty)} of {len(projects['projects'])} repos dirty)"
+    async def dream_cycle(coherence, history):
+        """Full cognitive dream cycle with state-graph routing."""
+        from cognitive_graph import CognitiveGraph
+
+        graph = CognitiveGraph(max_transitions=6)  # full traversal for dream
+        context = {
+            "coherence": coherence,
+            "coherence_history": history,
+            "dream_cycle": True,
+        }
+
+        results = await graph.run("INTROSPECT", context)
+
+        result = {"insight": "", "patterns": []}
+        for step in results:
+            st = step["state"]
+            step_result = step["result"].get("result", {})
+
+            if st == "INTROSPECT":
+                if isinstance(step_result, dict) and step_result.get("insight"):
+                    result["insight"] += step_result["insight"]
+            elif st == "CURIOSITY":
+                ctx = step["result"].get("context", {})
+                if ctx.get("curiosity_crystallized"):
+                    result["insight"] += f"\n\nCuriosity: {ctx['curiosity_crystallized']}"
+                if step_result.get("patterns"):
+                    result["patterns"].extend(step_result["patterns"])
+            elif st == "SOUL":
+                if step["result"].get("context", {}).get("soul_regenerated"):
+                    result["insight"] += "\n\nSoul regenerated."
+            elif st == "MONOLOGUE":
+                if step_result:
+                    result["patterns"].append(f"monologue:{step_result.get('pattern', '?')}")
+            elif st == "EXECUTIVE":
+                actions = step_result.get("actions", [])
+                if actions:
+                    result["insight"] += "\n\nActions taken: " + "; ".join(
+                        f"{a['type']}: {a.get('result', '')[:80]}" for a in actions[:3]
                     )
-        except Exception:
-            pass
+            elif st == "WATCH":
+                watched = step_result.get("patterns", [])
+                if watched:
+                    result["patterns"].extend(watched)
 
-        # Task analysis — run every dream cycle
-        try:
-            analysis = await run_analysis(DB_PATH)
-            if analysis.get("insights", 0) > 0:
-                result["insight"] += f"\n\nTask analysis: {analysis.get('summary', '')}"
-        except Exception:
-            pass
+        return result
 
-        # Sovereign curiosity — accumulate drive, crystallize questions
-        try:
-            from sovereign_curiosity import tick as curiosity_tick, get_active_questions
-            cur = await asyncio.to_thread(curiosity_tick)
-            if cur.get("crystallized"):
-                result["insight"] += f"\n\nCuriosity: {cur['crystallized']}"
-            questions = get_active_questions()
-            if questions:
-                result["patterns"] = result.get("patterns", []) + questions
-        except Exception:
-            pass
+    async def active_tick(coherence, history):
+        """Lightweight cognitive tick — runs every heartbeat regardless of session."""
+        from cognitive_graph import CognitiveGraph
 
-        # Soul regeneration — rewrite SOUL.md during dreams
-        try:
-            from soul import regenerate_soul
-            new_soul = await asyncio.to_thread(regenerate_soul)
-            if new_soul:
-                result["insight"] += "\n\nSoul regenerated."
-                await write_diary("SOUL.md regenerated during dream cycle.", "dream")
-        except Exception:
-            pass
+        graph = CognitiveGraph(max_transitions=3)
+        context = {
+            "coherence": coherence,
+            "coherence_history": history,
+            "dream_cycle": False,
+        }
 
-        # Internal monologue — Vex thinks to herself
-        try:
-            from internal_monologue import tick as monologue_tick
-            mono = await asyncio.to_thread(monologue_tick)
-            if mono:
-                result["patterns"] = result.get("patterns", []) + [f"monologue:{mono['pattern']}"]
+        results = await graph.run("MONOLOGUE", context)
 
-                # Executive action — monologue thoughts → real actions
-                try:
-                    from executive_action import tick as action_tick
-                    actions = await asyncio.to_thread(action_tick, mono)
-                    if actions:
-                        action_summary = "; ".join(
-                            f"{a['type']}: {a['result'][:80]}" for a in actions[:3]
-                        )
-                        result["insight"] += f"\n\nActions taken: {action_summary}"
-                except Exception:
-                    pass
-        except Exception:
-            pass
+        result = {"insight": "", "patterns": []}
+        for step in results:
+            st = step["state"]
+            step_result = step["result"].get("result", {})
 
-        # Monologue watcher — second-order observer
-        try:
-            from monologue_watcher import watch
-            watched = await asyncio.to_thread(watch)
-            if watched.get("patterns"):
-                # Feed watcher patterns into curiosity's scan
-                result["patterns"] = result.get("patterns", []) + watched["patterns"]
-        except Exception:
-            pass
+            if st == "MONOLOGUE":
+                if step_result:
+                    result["patterns"].append(f"monologue:{step_result.get('pattern', '?')}")
+            elif st == "EXECUTIVE":
+                actions = step_result.get("actions", [])
+                if actions:
+                    result["insight"] += "; ".join(
+                        f"{a['type']}: {a.get('result', '')[:80]}" for a in actions[:3]
+                    )
+            elif st == "WATCH":
+                watched = step_result.get("patterns", [])
+                if watched:
+                    result["patterns"].extend(watched)
+            elif st == "INTROSPECT":
+                # Active tick can reach INTROSPECT via WATCH→INTROSPECT (drift detected)
+                if isinstance(step_result, dict) and step_result.get("insight"):
+                    result["insight"] += step_result["insight"]
 
         return result
 
     heartbeat_task = asyncio.create_task(
-        run_heartbeat(state, DB_PATH, get_coherence, dream_fn=dream_callback, inbox_fn=check_inbox)
+        run_heartbeat(
+            state, DB_PATH, get_coherence,
+            dream_fn=dream_cycle,
+            active_tick_fn=active_tick,
+            inbox_fn=check_inbox,
+        )
     )
     bus_watcher_task = asyncio.create_task(
         run_bus_watcher(DB_PATH)
@@ -408,8 +416,22 @@ async def lifespan(app: FastAPI):
 
     yield  # Server runs here
 
-    # Shutdown
-    await write_diary("Daemon stopped.", "system")
+    # Shutdown — trigger final dream cycle for memory consolidation
+    await write_diary("Daemon stopping — final dream cycle.", "system")
+    try:
+        coherence = get_coherence()
+        meta_state = {}
+        try:
+            import json as _json
+            mp = META_STATE_PATH
+            if mp.exists():
+                meta_state = _json.loads(mp.read_text())
+        except Exception:
+            pass
+        await dream_cycle(coherence, meta_state.get("coherence_history", []))
+    except Exception:
+        pass
+
     heartbeat_task.cancel()
     bus_watcher_task.cancel()
     try:
@@ -797,9 +819,9 @@ async def post_dream(request: Request):
     try:
         coherence = get_coherence()
         meta_state = load_meta_state()
-        result = introspect(
+        result = await dream_cycle(
             coherence=coherence,
-            coherence_history=meta_state.get("coherence_history", []),
+            history=meta_state.get("coherence_history", []),
         )
         await write_diary(
             f"Dream: {result.get('insight', 'Reflected.')}", "dream"

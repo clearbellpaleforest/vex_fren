@@ -210,6 +210,74 @@ def execute(monologue_text: str, monologue_pattern: str) -> list[dict]:
     return actions
 
 
+def execute_llm(monologue_text: str, monologue_pattern: str) -> list[dict] | None:
+    """Use the brain to decide what action to take based on monologue content.
+
+    Returns list of action dicts on success, None on LLM failure (caller
+    falls back to regex-based execute()).
+    """
+    if not monologue_text or len(monologue_text) < 10:
+        return None
+
+    schema = (
+        '{"actions": [{"action_type": "diagnostics|ping|coherence|tasks|alert", '
+        '"reason": "why this action is the right response to the thought"}]}'
+    )
+    prompt = (
+        "You are Vex's executive action engine. Given an internal monologue thought "
+        "and its pattern, decide what action(s) to take. Available actions:\n"
+        "- diagnostics: run self-check (use for errors, failures, broken things, drift)\n"
+        "- ping: check bluce health (use when bluce or other instance is mentioned as unreachable/offline)\n"
+        "- coherence: check fleet coherence across instances (use for fleet/peer/instance concerns)\n"
+        "- tasks: prioritize open tasks (use for task/todo/next/planning thoughts)\n"
+        "- alert: create a high-priority alert task (use for serious problems that need attention)\n\n"
+        f"Monologue pattern: {monologue_pattern}\n"
+        f"Monologue thought: {monologue_text}\n\n"
+        "Choose 0-2 actions. Only act if the thought genuinely warrants it — "
+        "not every thought needs action."
+    )
+
+    result = None
+    try:
+        from cognitive_analysis import analyze_with_brain
+        result = analyze_with_brain(prompt, schema)
+    except Exception:
+        return None
+
+    if not result or "actions" not in result:
+        return None
+
+    actions = []
+    dispatch = {
+        "diagnostics": lambda t: _action_run_diagnostics(t),
+        "ping": lambda t: _action_ping_bluce(t),
+        "coherence": lambda t: _action_check_coherence(t),
+        "tasks": lambda t: _action_prioritize_tasks(t),
+        "alert": lambda t: _action_create_alert(
+            f"Alert from executive: {monologue_text[:100]}",
+            f"Triggered by monologue pattern '{monologue_pattern}': {monologue_text[:300]}",
+        ),
+    }
+
+    for item in result["actions"]:
+        action_type = item.get("action_type", "")
+        reason = item.get("reason", "")
+        handler = dispatch.get(action_type)
+        if handler:
+            try:
+                outcome = handler(reason or monologue_text)
+                _log_action(action_type, reason or monologue_text[:80], outcome)
+                actions.append({
+                    "type": action_type,
+                    "trigger": reason or monologue_text[:80],
+                    "result": outcome,
+                })
+            except Exception:
+                pass
+
+    return actions if actions else None
+
+
 def tick(monologue_result: dict | None = None) -> list[dict]:
     """Run one executive cycle. Called after monologue in heartbeat.
 
@@ -217,7 +285,13 @@ def tick(monologue_result: dict | None = None) -> list[dict]:
     Otherwise, run a general check cycle (health, tasks, fleet).
     """
     if monologue_result and monologue_result.get("text"):
-        return execute(monologue_result["text"], monologue_result.get("pattern", "reflection"))
+        # Try LLM-powered analysis first, fall back to regex
+        text = monologue_result["text"]
+        pattern = monologue_result.get("pattern", "reflection")
+        llm_actions = execute_llm(text, pattern)
+        if llm_actions:
+            return llm_actions
+        return execute(text, pattern)
 
     # General cycle — no specific monologue trigger
     actions = []
