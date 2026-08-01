@@ -51,6 +51,12 @@ impl Client {
         let home = std::env::var("VEX_HOME")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
+                // Check current directory first — CLI may be invoked from Vex home
+                if let Ok(cwd) = std::env::current_dir() {
+                    if cwd.join("vex.db").exists() || cwd.join(".vex_token").exists() {
+                        return cwd;
+                    }
+                }
                 let mut h = dirs_fallback();
                 h.push("vex");
                 h

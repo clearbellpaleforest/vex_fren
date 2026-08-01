@@ -160,6 +160,12 @@ fn vex_home() -> std::path::PathBuf {
     std::env::var("VEX_HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
+            // Check current directory first — daemon may be running from Vex home
+            if let Ok(cwd) = std::env::current_dir() {
+                if cwd.join("vex.db").exists() || cwd.join(".vex_token").exists() {
+                    return cwd;
+                }
+            }
             let mut h = client::dirs_fallback();
             h.push("vex");
             h
