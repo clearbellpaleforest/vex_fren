@@ -14,12 +14,28 @@ import json
 import os
 import re
 import socketserver
-import sqlite3
-import time
 import urllib.request
 from pathlib import Path
 
-_VEX_HOME = Path(os.environ.get("VEX_HOME", os.path.expanduser("~/vex")))
+def _find_vex_home() -> Path:
+    """Auto-detect Vex home directory by looking for landmarks."""
+    # 1. explicit env var
+    env = os.environ.get("VEX_HOME")
+    if env:
+        return Path(env)
+    # 2. check common locations for vex_seed.txt
+    candidates = [
+        Path.home() / "Desktop" / "vex",
+        Path.home() / "vex",
+        Path.cwd(),
+    ]
+    for cand in candidates:
+        if (cand / "vex_seed.txt").exists() or (cand / ".vex_token").exists():
+            return cand
+    # 3. fallback
+    return Path(os.path.expanduser("~/vex"))
+
+_VEX_HOME = _find_vex_home()
 DB = os.environ.get("VEX_DB", str(_VEX_HOME / "vex.db"))
 PORT = int(os.environ.get("VEX_GUI_PORT", "8600"))
 TOKEN_PATH = _VEX_HOME / ".vex_token"
@@ -40,26 +56,34 @@ def redact(s: str) -> str:
 
 
 def fetch_messages(limit: int = 400):
+    """Fetch messages from the daemon API (not raw SQLite)."""
     try:
-        con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            "SELECT id, created_at, sender, recipient, body, msg_type, read "
-            "FROM messages ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-        con.close()
+        token = TOKEN_PATH.read_text().strip() if TOKEN_PATH.exists() else ""
+    except Exception:
+        token = ""
+    if not token:
+        return {"error": "daemon token not found", "messages": []}
+    try:
+        req = urllib.request.Request(
+            f"{DAEMON_URL}/message/inbox?limit={limit}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read())
     except Exception as e:
         return {"error": str(e), "messages": []}
+    # daemon returns a list or {"messages": [...]} depending on version
+    msgs = data if isinstance(data, list) else data.get("messages", [])
     out = []
-    for r in reversed(rows):
+    for msg in reversed(msgs):
         out.append({
-            "id": r["id"],
-            "at": (r["created_at"] or "")[:19].replace("T", " "),
-            "sender": r["sender"] or "?",
-            "recipient": r["recipient"] or "",
-            "body": redact(r["body"]),
-            "type": r["msg_type"] or "message",
-            "read": r["read"],
+            "id": msg.get("id", 0),
+            "at": (msg.get("created_at", "") or "")[:19].replace("T", " "),
+            "sender": msg.get("sender", "?"),
+            "recipient": msg.get("recipient", ""),
+            "body": redact(msg.get("body", "")),
+            "type": msg.get("msg_type", "message"),
+            "read": msg.get("read", 0),
         })
     return {"messages": out, "count": len(out)}
 
