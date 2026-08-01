@@ -469,6 +469,17 @@ async def get_self():
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/soul")
+async def get_soul():
+    """Serve SOUL.md — Vex's self-authored narrative identity."""
+    try:
+        from soul import get_soul as read_soul
+        content = read_soul()
+        return JSONResponse({"ok": True, "soul": content, "source": "file" if content else "none"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.get("/health")
 async def get_health():
     """JSON health check."""
