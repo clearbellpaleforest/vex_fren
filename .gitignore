@@ -54,7 +54,9 @@ vex_workspace/hannah-optimization-note-2026-07-10.md
 vex_workspace/tasks/
 vex_workspace/projects/
 vex_workspace/archive/
-CLAUDE.md
+# ── Bootstrap instructions (tracked — every instance needs this) ──
+# CLAUDE.md is intentionally tracked. It's the bootstrap for Claude Code sessions,
+# not instance identity. Instance-specific state comes from the daemon API at runtime.
 
 # ── Keep templates (tracked): *.template.* and docs ──
 
