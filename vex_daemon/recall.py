@@ -109,6 +109,24 @@ def recall(query: str, k: int = 5, db_path=DB_PATH) -> list[dict]:
         conn.close()
 
 
+def recall_context_blob(query: str, k: int = 5) -> str:
+    """Return recall results as a compact text blob for prompt injection.
+
+    One memory per line: "[date] summary (relevance: coverage)"
+    Suitable for injection into system prompts, monologue context, or
+    session bootstrap.
+    """
+    results = recall(query, k=k)
+    if not results:
+        return "(no relevant memories found)"
+    lines = []
+    for r in results:
+        cov = r.get("coverage", 0)
+        lines.append(f"[{r.get('date', '?')}] ({r.get('ref', '?')}) "
+                     f"{r.get('summary', '')[:300]}")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     import sys
     q = " ".join(sys.argv[1:]) or "metacognition dream engine"

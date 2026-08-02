@@ -87,6 +87,19 @@ def apply_delta(model: dict, domain: str, delta: float, evidence: str) -> dict:
     # Keep last 20 evidence entries
     cap["evidence"] = evidence_list[-20:]
 
+    # If this is a correction (negative delta), record it in correction memory
+    if delta < 0:
+        try:
+            from correction_memory import record_correction
+            record_correction(
+                domain=domain,
+                statement=f"Self-model capability '{domain}' was downgraded",
+                correction=evidence,
+                delta=delta,
+            )
+        except Exception:
+            pass  # Non-critical — correction log is best-effort
+
     # Append session log entry
     logs = model.setdefault("session_log", [])
     if not logs or logs[-1].get("summary") != evidence:

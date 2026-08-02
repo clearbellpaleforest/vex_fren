@@ -67,6 +67,14 @@ def _detect_repetition(utterances: list[dict]) -> list[str]:
     if len(utterances) < 3:
         return []
 
+    # Get watcher sensitivity from temporal modulation
+    sensitivity = 1.0
+    try:
+        from temporal_modulator import get_modulation
+        sensitivity = get_modulation().watcher_sensitivity
+    except Exception:
+        pass
+
     # Extract key terms from recent utterances
     all_words = []
     for u in utterances[-8:]:
@@ -75,7 +83,8 @@ def _detect_repetition(utterances: list[dict]) -> list[str]:
         all_words.extend(words)
 
     counter = Counter(all_words)
-    repeated = [word for word, count in counter.most_common(10) if count >= 3]
+    threshold = max(1, int(3 / sensitivity))  # lower threshold when sensitive
+    repeated = [word for word, count in counter.most_common(10) if count >= threshold]
 
     patterns = []
     if repeated:
@@ -157,6 +166,73 @@ def _detect_growth(utterances: list[dict]) -> list[str]:
     depth_score = depth_patterns.get("self_questioning", 0) + depth_patterns.get("wonder", 0)
     if depth_score >= 2:
         patterns.append("growth:increased_depth")
+
+    return patterns
+
+
+def _detect_narrative_arc(utterances: list[dict]) -> list[str]:
+    """Detect narrative patterns across threaded utterances.
+
+    Requires seq numbers in the utterance dicts (from monologue threading).
+    """
+    if len(utterances) < 3:
+        return []
+
+    patterns = []
+
+    # Check for building concern (consecutive concern patterns)
+    recent_patterns = [u.get("pattern", "") for u in utterances[-5:]]
+    concern_streak = 0
+    for p in reversed(recent_patterns):
+        if p == "concern":
+            concern_streak += 1
+        else:
+            break
+    if concern_streak >= 3:
+        patterns.append("narrative:building_concern")
+
+    # Check for resolution (concern → planning or gratitude)
+    if len(recent_patterns) >= 3:
+        last_three = recent_patterns[-3:]
+        if "concern" in last_three[:2] and last_three[2] in ("planning", "gratitude"):
+            patterns.append("narrative:resolution")
+
+    # Check for thematic return (same theme as 5+ utterances ago)
+    if len(utterances) >= 6:
+        current_text = utterances[-1].get("text", "").lower()
+        old_text = utterances[-6].get("text", "").lower()
+        shared_words = set(current_text.split()) & set(old_text.split())
+        meaningful = [w for w in shared_words if len(w) > 4]
+        if len(meaningful) >= 3:
+            patterns.append(f"narrative:thematic_return_{len(meaningful)}_words")
+
+    return patterns
+
+
+def _detect_callbacks(utterances: list[dict]) -> list[str]:
+    """Detect when Vex explicitly references her own earlier thoughts."""
+    if not utterances:
+        return []
+
+    text = utterances[-1].get("text", "").lower()
+    patterns = []
+
+    callback_markers = [
+        "i was thinking",
+        "earlier i",
+        "i keep coming back to",
+        "still wondering",
+        "i mentioned",
+        "as i said",
+        "that thought about",
+        "can't stop thinking",
+        "haunting me",
+        "on my mind again",
+    ]
+    for marker in callback_markers:
+        if marker in text:
+            patterns.append(f"callback:self_reference")
+            break
 
     return patterns
 
@@ -245,6 +321,8 @@ def watch() -> dict:
     patterns.extend(_detect_drift(utterances))
     patterns.extend(_detect_silence(state))
     patterns.extend(_detect_growth(utterances))
+    patterns.extend(_detect_narrative_arc(utterances))
+    patterns.extend(_detect_callbacks(utterances))
 
     # Deduplicate while preserving order
     seen = set()

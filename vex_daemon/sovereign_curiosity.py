@@ -31,6 +31,8 @@ class SovereignIntention:
     persistence: float = 1.0
     created_at: str = ""
     contemplation_count: int = 0
+    research_attempts: int = 0
+    last_researched_at: str = ""
 
     def __post_init__(self):
         if not self.created_at:
@@ -57,6 +59,8 @@ class CuriosityState:
                     "persistence": i.persistence,
                     "created_at": i.created_at,
                     "contemplation_count": i.contemplation_count,
+                    "research_attempts": i.research_attempts,
+                    "last_researched_at": i.last_researched_at,
                 }
                 for i in self.intentions
             ],
@@ -77,6 +81,8 @@ class CuriosityState:
                 persistence=i.get("persistence", 1.0),
                 created_at=i.get("created_at", ""),
                 contemplation_count=i.get("contemplation_count", 0),
+                research_attempts=i.get("research_attempts", 0),
+                last_researched_at=i.get("last_researched_at", ""),
             ))
         return state
 
@@ -320,8 +326,18 @@ def tick() -> dict:
     # Phase 3: Decay
     state.drive = max(0.0, state.drive - DRIVE_DECAY)
 
+    # Apply temporal modulation to drive and threshold
+    effective_threshold = DRIVE_THRESHOLD
+    try:
+        from temporal_modulator import get_modulation
+        mod = get_modulation()
+        state.drive = max(0.0, min(1.0, state.drive + mod.curiosity_drive_bonus))
+        effective_threshold = DRIVE_THRESHOLD + mod.curiosity_threshold_shift
+    except Exception:
+        pass
+
     # Phase 4: Crystallize if above threshold
-    if (state.drive >= DRIVE_THRESHOLD
+    if (state.drive >= effective_threshold
             and (now - state.last_crystallized) >= COOLDOWN_SECONDS
             and len(state.intentions) < MAX_INTENTIONS
             and patterns):
@@ -389,6 +405,65 @@ def _create_curiosity_task(question: str, pattern: str) -> None:
         _ureq.urlopen(req, timeout=5)
     except Exception:
         pass  # Non-critical — don't block curiosity cycle
+
+
+def research_question(intention_index: int = 0) -> dict | None:
+    """Phase 7: actually investigate a crystallized question.
+
+    Args:
+        intention_index: Index into state.intentions (0 = most persistent).
+
+    Returns dict with {question, findings, confidence, memory_ref} or None.
+    """
+    state = _load()
+    if not state.intentions:
+        return None
+
+    # Find the intention to research (highest persistence, under research limit)
+    sorted_intentions = sorted(
+        state.intentions, key=lambda x: x.persistence, reverse=True
+    )
+    if intention_index >= len(sorted_intentions):
+        return None
+
+    intention = sorted_intentions[intention_index]
+    if intention.research_attempts >= MAX_RESEARCH_ATTEMPTS:
+        return None  # Already fully researched
+
+    import time as _time
+    now = _time.time()
+    if intention.last_researched_at:
+        try:
+            last = _time.mktime(_time.strptime(
+                intention.last_researched_at[:19], "%Y-%m-%dT%H:%M:%S"
+            ))
+            if now - last < RESEARCH_COOLDOWN:
+                return None  # On cooldown
+        except (ValueError, OSError):
+            pass
+
+    # Actually research
+    try:
+        from curiosity_research import investigate
+        result = investigate(intention.question)
+    except Exception:
+        return None
+
+    # Update intention
+    intention.research_attempts += 1
+    intention.last_researched_at = _now() if hasattr(sys.modules[__name__], '_now') else datetime.now(timezone.utc).isoformat()
+    import datetime as _dt
+    intention.last_researched_at = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    intention.persistence = min(1.0, intention.persistence + 0.15)
+
+    _save(state)
+
+    return {
+        "question": result.question,
+        "findings": result.findings,
+        "confidence": result.confidence,
+        "memory_ref": result.memory_ref,
+    }
 
 
 def get_active_questions() -> list[str]:

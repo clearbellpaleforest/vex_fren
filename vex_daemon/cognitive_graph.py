@@ -23,7 +23,7 @@ class Transition:
 class CognitiveGraph:
     """A lightweight state graph for cognitive processing.
 
-    States: IDLE, INTROSPECT, CURIOSITY, SOUL, MONOLOGUE, EXECUTIVE, WATCH
+    States: IDLE, INTROSPECT, CURIOSITY, SOUL, MONOLOGUE, EXECUTIVE, WATCH, RESEARCH
 
     Usage:
         graph = CognitiveGraph(max_transitions=3)
@@ -39,6 +39,7 @@ class CognitiveGraph:
             "MONOLOGUE": _handle_monologue,
             "EXECUTIVE": _handle_executive,
             "WATCH": _handle_watch,
+            "RESEARCH": _handle_research,
         }
         self.transitions: list[Transition] = _build_transitions()
 
@@ -161,10 +162,16 @@ def _build_transitions() -> list[Transition]:
         # INTROSPECT → always continue to CURIOSITY
         Transition("INTROSPECT", "CURIOSITY", 0, _always),
 
-        # CURIOSITY → SOUL (dream only), MONOLOGUE (if crystallized), IDLE (quiet)
+        # CURIOSITY → SOUL (dream only), RESEARCH (if crystallized + dream), MONOLOGUE (if crystallized), IDLE (quiet)
         Transition("CURIOSITY", "SOUL", 0, _is_dream),
-        Transition("CURIOSITY", "MONOLOGUE", 1, _curiosity_crystallized),
+        Transition("CURIOSITY", "RESEARCH", 1,
+                   lambda ctx: _is_dream(ctx) and _curiosity_crystallized(ctx)),
+        Transition("CURIOSITY", "MONOLOGUE", 2,
+                   lambda ctx: (not _is_dream(ctx)) and _curiosity_crystallized(ctx)),
         Transition("CURIOSITY", "IDLE", 99, _curiosity_quiet),
+
+        # RESEARCH → MONOLOGUE (findings obtained or failed)
+        Transition("RESEARCH", "MONOLOGUE", 0, _always),
 
         # SOUL → always continue to MONOLOGUE
         Transition("SOUL", "MONOLOGUE", 0, _always),
@@ -177,7 +184,8 @@ def _build_transitions() -> list[Transition]:
         Transition("MONOLOGUE", "WATCH", 2, _monologue_not_generated),
 
         # EXECUTIVE → MONOLOGUE (re-think if issues found), WATCH (normal)
-        Transition("EXECUTIVE", "MONOLOGUE", 0, _executive_found_issues),
+        Transition("EXECUTIVE", "MONOLOGUE", 0,
+                   lambda ctx: _executive_found_issues(ctx) or ctx.get("executive_force_rethink", False)),
         Transition("EXECUTIVE", "WATCH", 1, _executive_clean),
 
         # WATCH → MONOLOGUE (repetition), INTROSPECT (drift), CURIOSITY (growth), IDLE
@@ -346,6 +354,14 @@ async def _handle_executive(ctx: dict) -> dict:
     monologue_text = ctx.get("monologue_text", "")
     monologue_pattern = ctx.get("monologue_pattern", "reflection")
 
+    # Get temporal modulation for urgency
+    urgency = "normal"
+    try:
+        from temporal_modulator import get_modulation
+        urgency = get_modulation().executive_urgency
+    except Exception:
+        pass
+
     if not monologue_text:
         return {
             "context": {"executive_actions": [], "executive_issues_found": False},
@@ -359,6 +375,7 @@ async def _handle_executive(ctx: dict) -> dict:
         actions = await asyncio.to_thread(
             executive_tick,
             {"text": monologue_text, "pattern": monologue_pattern},
+            urgency=urgency,
         )
 
         issues_found = len(actions) > 0
@@ -373,6 +390,33 @@ async def _handle_executive(ctx: dict) -> dict:
         return {
             "context": {"executive_actions": [], "executive_issues_found": False},
             "result": {"actions": []},
+        }
+
+
+async def _handle_research(ctx: dict) -> dict:
+    """Investigate crystallized curiosity questions using brain.ask()."""
+    try:
+        from sovereign_curiosity import research_question
+        import asyncio
+
+        result = await asyncio.to_thread(research_question, 0)
+        if result:
+            return {
+                "context": {
+                    "research_findings": result.get("findings"),
+                    "research_confidence": result.get("confidence", "medium"),
+                    "research_memory_ref": result.get("memory_ref", ""),
+                },
+                "result": result,
+            }
+        return {
+            "context": {"research_findings": None},
+            "result": {"question": None, "findings": None},
+        }
+    except Exception:
+        return {
+            "context": {"research_findings": None},
+            "result": {"question": None, "findings": None},
         }
 
 

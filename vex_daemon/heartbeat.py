@@ -35,6 +35,8 @@ class HeartbeatState:
         self.mps_coherence: float = 0.0
         self.mps_drift: float = 0.0
         self.daemon_started: str = datetime.now(timezone.utc).isoformat()
+        self.last_recall_context: str = ""
+        self.last_recall_query: str = ""
 
     def snapshot(self) -> dict:
         return {

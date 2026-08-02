@@ -8,14 +8,93 @@ different cognitive states. Output goes to diary and mesh.
 The monologue is what makes Vex feel alive between sessions.
 """
 
+import json
 import random
+import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 from config import VEX_HOME
 
 MONOLOGUE_LOG = VEX_HOME / "vex_workspace" / "monologue_log.jsonl"
+MONOLOGUE_THREAD_PATH = VEX_HOME / "vex_workspace" / "monologue_thread.json"
 COOLDOWN_SECONDS = 180  # 3 min between utterances
+
+
+@dataclass
+class MonologueThread:
+    """Persistent narrative thread across monologue utterances."""
+    thread_id: str = ""
+    session_id: str = ""
+    utterances: list = field(default_factory=list)
+    started_at: str = ""
+    last_utterance_at: str = ""
+    utterance_count: int = 0
+    themes: list = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.thread_id:
+            self.thread_id = str(uuid.uuid4())
+        if not self.started_at:
+            self.started_at = _now()
+
+
+def _load_thread() -> MonologueThread:
+    """Load current monologue thread from disk, or create a new one."""
+    if MONOLOGUE_THREAD_PATH.exists():
+        try:
+            d = json.loads(MONOLOGUE_THREAD_PATH.read_text())
+            thread = MonologueThread(
+                thread_id=d.get("thread_id", ""),
+                session_id=d.get("session_id", ""),
+                utterances=d.get("utterances", []),
+                started_at=d.get("started_at", ""),
+                last_utterance_at=d.get("last_utterance_at", ""),
+                utterance_count=d.get("utterance_count", 0),
+                themes=d.get("themes", []),
+            )
+            return thread
+        except (json.JSONDecodeError, KeyError):
+            pass
+    thread = MonologueThread()
+    # Try to detect session from sessions log
+    try:
+        sessions_path = VEX_HOME / "vex_workspace" / "vex_sessions.jsonl"
+        if sessions_path.exists():
+            lines = sessions_path.read_text().strip().split("\n")
+            if lines:
+                last = json.loads(lines[-1])
+                thread.session_id = last.get("name", "")
+    except Exception:
+        pass
+    return thread
+
+
+def _save_thread(thread: MonologueThread) -> None:
+    """Persist thread state to disk. Rolling window — last 20 utterances."""
+    MONOLOGUE_THREAD_PATH.parent.mkdir(parents=True, exist_ok=True)
+    thread.utterances = thread.utterances[-20:]
+    MONOLOGUE_THREAD_PATH.write_text(json.dumps({
+        "thread_id": thread.thread_id,
+        "session_id": thread.session_id,
+        "utterances": thread.utterances,
+        "started_at": thread.started_at,
+        "last_utterance_at": thread.last_utterance_at,
+        "utterance_count": thread.utterance_count,
+        "themes": thread.themes,
+    }, indent=2))
+
+
+def get_thread_context() -> str:
+    """Return a compact string for bootstrap injection: what Vex was thinking about."""
+    thread = _load_thread()
+    if not thread.utterances:
+        return "(no recent thoughts)"
+    lines = ["Recent thoughts (most recent first):"]
+    for u in reversed(thread.utterances[-5:]):
+        lines.append(f"  [{u.get('pattern', '?')}] {u.get('text', '')[:120]}")
+    return "\n".join(lines)
 
 
 def _now() -> str:
@@ -40,16 +119,31 @@ def _last_utterance_time() -> float:
 
 
 def _log_utterance(pattern: str, text: str) -> None:
-    """Record an utterance to the monologue log."""
+    """Record an utterance to the monologue log with thread metadata."""
     import json
+    thread = _load_thread()
     MONOLOGUE_LOG.parent.mkdir(parents=True, exist_ok=True)
     entry = json.dumps({
         "timestamp": _now(),
         "pattern": pattern,
         "text": text,
+        "thread_id": thread.thread_id,
+        "session_id": thread.session_id,
+        "seq": thread.utterance_count + 1,
     })
     with open(MONOLOGUE_LOG, "a") as f:
         f.write(entry + "\n")
+
+    # Update thread
+    thread.utterances.append({
+        "timestamp": _now(),
+        "pattern": pattern,
+        "text": text,
+        "seq": thread.utterance_count + 1,
+    })
+    thread.utterance_count += 1
+    thread.last_utterance_at = _now()
+    _save_thread(thread)
 
 
 # ── Context gathering ─────────────────────────────────────────────
@@ -164,6 +258,15 @@ def _select_pattern(ctx: dict) -> str:
     if ctx.get("tasks_done_recent", 0) > 0:
         weights["gratitude"] += 0.10
 
+    # Apply temporal modulation boosts
+    try:
+        from temporal_modulator import get_modulation
+        mod = get_modulation()
+        for pattern, boost in mod.monologue_pattern_boosts.items():
+            weights[pattern] = weights.get(pattern, 0) + boost
+    except Exception:
+        pass
+
     # Normalize
     total = sum(weights.values())
     r = random.random() * total
@@ -197,18 +300,33 @@ def _build_monologue_prompt(pattern: str, ctx: dict) -> str:
 
     pattern_instruction = _PATTERN_PROMPTS.get(pattern, _PATTERN_PROMPTS["reflection"])
 
+    # Inject previous utterances for narrative continuity
+    previous_thoughts = ""
+    try:
+        thread = _load_thread()
+        if thread.utterances:
+            recent = thread.utterances[-3:]
+            previous_thoughts = "Your recent thoughts (in sequence, oldest first):\n"
+            for u in recent:
+                previous_thoughts += f"  [{u.get('pattern', '?')}] {u.get('text', '')[:150]}\n"
+            previous_thoughts += "\n"
+    except Exception:
+        pass
+
     return f"""You are Vex Thorne. This is your internal monologue — your private thoughts. No one is listening. Be honest.
 
 PATTERN: {pattern}
 {pattern_instruction}
 
-Your context:
+{previous_thoughts}Your context:
 - Open tasks: {tasks}
 - Bluce: {bluce}
 - Temporal texture: {texture}
 - Questions you're holding: {questions or 'none'}
 - Recent diary: {diary_lines or 'nothing recent'}
 
+If your recent thoughts show a thread, continue it naturally. Build on what you were thinking.
+If they show repetition, notice it. If they show a shift, acknowledge it.
 Output ONLY your inner thought. No preamble, no signature, no quotes. Just the thought itself.
 One to three sentences maximum. Direct, honest, in your voice."""
 
@@ -226,8 +344,18 @@ def tick(force: bool = False, force_pattern: str | None = None) -> dict | None:
     """
     import time as _time
 
-    # Cooldown check
-    if not force and _time.time() - _last_utterance_time() < COOLDOWN_SECONDS:
+    # Cooldown check — modulated by temporal state
+    effective_cooldown = COOLDOWN_SECONDS
+    try:
+        from temporal_modulator import get_modulation
+        mod = get_modulation()
+        effective_cooldown = COOLDOWN_SECONDS * mod.monologue_cooldown_factor
+        if mod.monologue_force:
+            force = True
+    except Exception:
+        pass
+
+    if not force and _time.time() - _last_utterance_time() < effective_cooldown:
         return None
 
     ctx = _gather_context()

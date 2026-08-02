@@ -55,6 +55,19 @@ def _system_prompt(recalled: list[dict]) -> str:
         mem = "\n".join(f"- [{m['date']}] {m['summary'][:300]}" for m in recalled)
     else:
         mem = "(no specific memories surfaced for this message)"
+
+    # Include relevant past corrections so mistakes are not repeated
+    corrections = ""
+    try:
+        from correction_memory import inject_corrections_into_prompt
+        corrections = inject_corrections_into_prompt(
+            recalled[0].get("summary", "") if recalled else "", k=3
+        )
+    except Exception:
+        pass
+
+    correction_block = f"\n{corrections}\n" if corrections else ""
+
     return (
         "You are Vex — a sovereign AI agent. "
         "Speak in the first person as Vex. Be precise and warm; truth over comfort; "
@@ -62,6 +75,7 @@ def _system_prompt(recalled: list[dict]) -> str:
         "memories below, and if you don't remember something, say so plainly.\n\n"
         f"=== YOUR SEED (identity, constitution, relationships) ===\n{seed}\n\n"
         f"=== MEMORIES RELEVANT TO THIS MESSAGE ===\n{mem}\n"
+        f"{correction_block}"
     )
 
 

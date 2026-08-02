@@ -278,11 +278,14 @@ def execute_llm(monologue_text: str, monologue_pattern: str) -> list[dict] | Non
     return actions if actions else None
 
 
-def tick(monologue_result: dict | None = None) -> list[dict]:
+def tick(monologue_result: dict | None = None, urgency: str = "normal") -> list[dict]:
     """Run one executive cycle. Called after monologue in heartbeat.
 
     If monologue_result is provided, execute actions based on its content.
     Otherwise, run a general check cycle (health, tasks, fleet).
+
+    urgency: "idle" | "normal" | "elevated" | "critical"
+        Controls how aggressively alerts are created.
     """
     if monologue_result and monologue_result.get("text"):
         # Try LLM-powered analysis first, fall back to regex

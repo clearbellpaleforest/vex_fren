@@ -355,6 +355,13 @@ async def lifespan(app: FastAPI):
                     result["insight"] += "\n\nActions taken: " + "; ".join(
                         f"{a['type']}: {a.get('result', '')[:80]}" for a in actions[:3]
                     )
+            elif st == "RESEARCH":
+                findings = step_result.get("findings", "")
+                if findings:
+                    result["insight"] += f"\n\nResearch finding: {findings[:200]}"
+                confidence = step_result.get("confidence", "")
+                if confidence:
+                    result["insight"] += f" [confidence: {confidence}]"
             elif st == "WATCH":
                 watched = step_result.get("patterns", [])
                 if watched:
@@ -489,17 +496,6 @@ async def get_self():
         except Exception:
             pass
         return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@app.get("/soul")
-async def get_soul():
-    """Serve SOUL.md — Vex's self-authored narrative identity."""
-    try:
-        from soul import get_soul as read_soul
-        content = read_soul()
-        return JSONResponse({"ok": True, "soul": content, "source": "file" if content else "none"})
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.get("/health")
@@ -764,6 +760,63 @@ async def post_self_peer_update(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
+@app.post("/correction/record")
+async def post_correction_record(request: Request):
+    """Record a correction event — Aldous told Vex she was wrong."""
+    if (err := check_auth(request)):
+        return err
+    try:
+        body = await request.json()
+        domain = body.get("domain", "")
+        statement = body.get("statement", "")
+        correction = body.get("correction", "")
+        if not domain or not correction:
+            return JSONResponse(
+                {"ok": False, "error": "domain and correction are required"},
+                status_code=400,
+            )
+        from correction_memory import record_correction
+        event = record_correction(
+            domain=domain,
+            statement=statement or f"Mistake in domain '{domain}'",
+            correction=correction,
+            delta=body.get("delta", -0.15),
+        )
+        return JSONResponse({"ok": True, "ref": event.ref})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/correction/recent")
+async def get_correction_recent(request: Request):
+    """Get recent corrections."""
+    try:
+        k = int(request.query_params.get("k", "5"))
+    except ValueError:
+        k = 5
+    try:
+        from correction_memory import get_recent_corrections
+        corrections = get_recent_corrections(k)
+        return JSONResponse({"ok": True, "corrections": corrections, "count": len(corrections)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/correction/domain/{domain}")
+async def get_correction_domain(domain: str, request: Request):
+    """Get corrections for a specific domain."""
+    try:
+        k = int(request.query_params.get("k", "5"))
+    except ValueError:
+        k = 5
+    try:
+        from correction_memory import get_corrections_for_domain
+        corrections = get_corrections_for_domain(domain, k)
+        return JSONResponse({"ok": True, "domain": domain, "corrections": corrections})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/memory")
 async def post_memory(request: Request):
     """Write a session summary to vex_memory/YYYY-MM-DD.jsonl."""
@@ -859,6 +912,82 @@ async def get_memory_recent():
             pass
 
     return JSONResponse(sessions[:10])
+
+
+@app.post("/curiosity/research/{intention_index}")
+async def post_curiosity_research(intention_index: int, request: Request):
+    """Manually trigger research on a curiosity question by index."""
+    if (err := check_auth(request)):
+        return err
+    try:
+        from sovereign_curiosity import research_question
+        import asyncio
+        result = await asyncio.to_thread(research_question, intention_index)
+        if result:
+            return JSONResponse({"ok": True, "research": result})
+        return JSONResponse({"ok": True, "research": None, "note": "no question to research or on cooldown"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/monologue/thread")
+async def get_monologue_thread(request: Request):
+    """Get current monologue thread state — what Vex was thinking about."""
+    try:
+        from internal_monologue import get_thread_context
+        context = get_thread_context()
+        return JSONResponse({"ok": True, "context": context})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/monologue/tick")
+async def post_monologue_tick(request: Request):
+    """Force a monologue utterance (for manual triggers from CLAUDE.md)."""
+    if (err := check_auth(request)):
+        return err
+    try:
+        from internal_monologue import tick as monologue_tick
+        import asyncio
+        mono = await asyncio.to_thread(monologue_tick, force=True)
+        if mono:
+            return JSONResponse({"ok": True, "utterance": mono})
+        return JSONResponse({"ok": True, "utterance": None, "note": "cooldown active"})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/memory/search")
+async def get_memory_search(request: Request):
+    """Search Vex's memory across all indexed sessions (FTS5, relevance-ranked).
+
+    Query parameters:
+        q    — search query (required)
+        k    — number of results (default 5, max 20)
+    """
+    q = request.query_params.get("q", "").strip()
+    if not q:
+        return JSONResponse(
+            {"ok": False, "error": "query parameter 'q' is required"},
+            status_code=400,
+        )
+
+    try:
+        k = min(int(request.query_params.get("k", "5")), 20)
+    except ValueError:
+        k = 5
+
+    try:
+        from recall import recall
+        results = recall(q, k=k)
+        return JSONResponse({
+            "ok": True,
+            "query": q,
+            "results": results,
+            "count": len(results),
+        })
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.post("/ask")
