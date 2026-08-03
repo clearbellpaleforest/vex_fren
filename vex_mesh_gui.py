@@ -76,16 +76,12 @@ def fetch_messages(limit: int = 400):
     msgs = data if isinstance(data, list) else data.get("messages", [])
     out = []
     for msg in reversed(msgs):
-        body = redact(msg.get("body", "") or "")
-        # Filter: skip FEN heartbeat ticks
-        if body.startswith("FEN heartbeat"):
-            continue
         out.append({
             "id": msg.get("id", 0),
             "at": (msg.get("created_at", "") or "")[:19].replace("T", " "),
             "sender": msg.get("sender", "?"),
             "recipient": msg.get("recipient", ""),
-            "body": body,
+            "body": redact(msg.get("body", "")),
             "type": msg.get("msg_type", "message"),
             "read": msg.get("read", 0),
         })
@@ -595,16 +591,46 @@ function renderFleet(f){
 
   // Task board
   let thtml='';
+
+  // Work time summary
+  const hoursToday = f.total_hours_today || 0;
+  const inProgress = f.tasks_in_progress || 0;
+  const completedToday = f.completed_today || 0;
+  if (hoursToday > 0 || inProgress > 0) {
+    thtml += '<div class="work-summary" style="padding:8px 12px;margin-bottom:8px;background:rgba(56,189,248,.08);border-radius:6px;display:flex;justify-content:space-between;align-items:center;font-size:12px">'+
+      '<span>⏱ <b>'+hoursToday.toFixed(1)+'h</b> worked today</span>'+
+      '<span>'+(inProgress>0?'◉ '+inProgress+' active':'')+(completedToday>0?' · ✓ '+completedToday+' done':'')+'</span>'+
+      '</div>';
+  }
+
   const tasks=f.task_board||[];
-  if(!tasks.length) thtml='<div class="empty">no open tasks</div>';
+  if(!tasks.length) thtml+='<div class="empty">no tasks</div>';
   else {
-    for(const t of tasks){
-      const icon={todo:'☐',in_progress:'◉',blocked:'⊘',done:'✓'}[t.status]||'?';
-      thtml+=`<div class="task-row">
-        <span class="prio ${t.priority}">${t.priority}</span>
-        <span>${icon} ${esc(t.title).substring(0,50)}</span>
-        <span style="color:var(--muted);margin-left:auto">${t.instance}</span>
-      </div>`;
+    const active=tasks.filter(function(t){return t.status!=='completed';});
+    const completed=tasks.filter(function(t){return t.status==='completed';});
+
+    for(var i=0;i<active.length;i++){
+      var t=active[i];
+      const icon={todo:'☐',in_progress:'◉',blocked:'⊘'}[t.status]||'?';
+      const started=t.started_at?' · '+t.started_at.substring(0,16).replace('T',' '):'';
+      thtml+='<div class="task-row">'+
+        '<span class="prio '+t.priority+'">'+(t.priority||'')+'</span>'+
+        '<span>'+icon+' '+esc(t.title).substring(0,50)+'</span>'+
+        '<span style="color:var(--muted);margin-left:auto;font-size:10px">'+started+'</span>'+
+        '</div>';
+    }
+
+    if(completed.length>0){
+      thtml+='<div style="color:var(--muted);font-size:11px;padding:8px 0 2px 0;margin-top:4px;border-top:1px solid var(--line)">✓ Completed today</div>';
+      for(var j=0;j<Math.min(completed.length,10);j++){
+        var c=completed[j];
+        var time=c.actual_hours?c.actual_hours.toFixed(1)+'h':'';
+        thtml+='<div class="task-row" style="opacity:.7">'+
+          '<span>✓</span>'+
+          '<span style="font-size:12px">'+esc(c.title).substring(0,45)+'</span>'+
+          '<span style="color:var(--muted);margin-left:auto;font-size:10px">'+time+'</span>'+
+          '</div>';
+      }
     }
   }
   document.getElementById('task-board').innerHTML=thtml;

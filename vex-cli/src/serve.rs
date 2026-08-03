@@ -1927,11 +1927,18 @@ pub async fn run(
             let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
             let parent_id = payload["parent_id"].as_i64();
             let project_id = payload["project_id"].as_i64();
+            let status = payload["status"].as_str().unwrap_or("todo");
+            let est_hours = payload["estimated_hours"].as_f64();
             db.execute(
-                "INSERT INTO tasks (project_id, parent_id, title, description, status, priority, source_agent, source_session, assigned_to, tags, created_at, updated_at, meta) VALUES (?1,?2,?3,?4,'todo',?5,'vex','rust-serve','any','[]',?6,?6,'{}')",
-                rusqlite::params![project_id, parent_id, title, payload["description"].as_str().unwrap_or(""), payload["priority"].as_str().unwrap_or("medium"), now],
+                "INSERT INTO tasks (project_id, parent_id, title, description, status, priority, source_agent, source_session, assigned_to, tags, created_at, updated_at, estimated_hours, meta) VALUES (?1,?2,?3,?4,?5,?6,'vex','rust-serve','any','[]',?7,?7,?8,'{}')",
+                rusqlite::params![project_id, parent_id, title, payload["description"].as_str().unwrap_or(""), status, payload["priority"].as_str().unwrap_or("medium"), now, est_hours],
             ).ok();
-            (StatusCode::OK, Json(json!({"ok":true,"id":db.last_insert_rowid()})))
+            let new_id = db.last_insert_rowid();
+            // Auto-set started_at if creating as in_progress
+            if status == "in_progress" {
+                db.execute("UPDATE tasks SET started_at=?1 WHERE id=?2", rusqlite::params![now, new_id]).ok();
+            }
+            (StatusCode::OK, Json(json!({"ok":true,"id":new_id})))
         }))
         .route("/tasks/{id}", get(|
             State(st): State<Arc<AppState>>,
@@ -1977,6 +1984,19 @@ pub async fn run(
                             rusqlite::params![id, now, field, old, new_val]).ok();
                     }
                     db.execute(&format!("UPDATE tasks SET {}=?1, updated_at=?2 WHERE id=?3", field), rusqlite::params![new_val, now, id]).ok();
+                }
+            }
+            // Auto-set started_at when moving to in_progress
+            if payload["status"].as_str() == Some("in_progress") {
+                let started: Option<String> = db.query_row("SELECT started_at FROM tasks WHERE id=?1", [id], |r| r.get(0)).ok().flatten();
+                if started.is_none() || started.as_deref() == Some("") {
+                    db.execute("UPDATE tasks SET started_at=?1, updated_at=?1 WHERE id=?2", rusqlite::params![now, id]).ok();
+                }
+            }
+            // Auto-set completed_at when moving to done/completed
+            if let Some(s) = payload["status"].as_str() {
+                if s == "done" || s == "completed" {
+                    db.execute("UPDATE tasks SET completed_at=?1, updated_at=?1 WHERE id=?2", rusqlite::params![now, id]).ok();
                 }
             }
             (StatusCode::OK, Json(json!({"ok":true})))
@@ -2030,12 +2050,31 @@ pub async fn run(
             State(st): State<Arc<AppState>>,
             axum::extract::Path(id): axum::extract::Path<i64>,
             headers: HeaderMap,
+            body: String,
         | async move {
             if check_auth(&headers, &st.token).is_err() { return (StatusCode::UNAUTHORIZED, Json(json!({"error":"unauthorized"}))); }
             let now = chrono::Utc::now().to_rfc3339();
             let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+
+            // Calculate actual_hours from started_at if provided
+            let payload: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            let actual_hours: Option<f64> = payload["actual_hours"].as_f64().or_else(|| {
+                // Fallback: calculate elapsed from started_at using SQLite
+                let elapsed: Option<f64> = db.query_row(
+                    "SELECT (julianday('now') - julianday(started_at)) * 24.0 FROM tasks WHERE id=?1 AND started_at IS NOT NULL AND started_at != ''",
+                    [id],
+                    |r| r.get(0)
+                ).ok().flatten();
+                elapsed.map(|h| (h * 10.0).round() / 10.0)
+            });
+
             db.execute("INSERT INTO task_history (task_id, changed_at, field, old_value, new_value) VALUES (?1,?2,'status','in_progress','done')", rusqlite::params![id, now]).ok();
-            db.execute("UPDATE tasks SET status='done', progress=1.0, completed_at=?1, updated_at=?1 WHERE id=?2", rusqlite::params![now, id]).ok();
+
+            if let Some(h) = actual_hours {
+                db.execute("UPDATE tasks SET status='done', progress=1.0, completed_at=?1, actual_hours=?2, updated_at=?1 WHERE id=?3", rusqlite::params![now, h, id]).ok();
+            } else {
+                db.execute("UPDATE tasks SET status='done', progress=1.0, completed_at=?1, updated_at=?1 WHERE id=?2", rusqlite::params![now, id]).ok();
+            }
             (StatusCode::OK, Json(json!({"ok":true})))
         }))
         .route("/tasks/{id}/block", post(|
@@ -2071,6 +2110,57 @@ pub async fn run(
             let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
             let task_count: i64 = db.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0)).unwrap_or(0);
             let done: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status IN ('completed','done')", [], |r| r.get(0)).unwrap_or(0);
+            let in_progress: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status='in_progress'", [], |r| r.get(0)).unwrap_or(0);
+
+            // Active tasks (todo, in_progress, blocked)
+            let mut active_tasks: Vec<Value> = Vec::new();
+            if let Ok(mut stmt) = db.prepare("SELECT id, title, status, priority, progress, started_at, estimated_hours, actual_hours, assigned_to FROM tasks WHERE status IN ('todo','in_progress','blocked') ORDER BY priority DESC, created_at ASC LIMIT 20") {
+                if let Ok(rows) = stmt.query_map([], |row| Ok(json!({
+                    "id": row.get::<_,i64>(0)?,
+                    "title": row.get::<_,String>(1)?,
+                    "status": row.get::<_,String>(2)?,
+                    "priority": row.get::<_,String>(3)?,
+                    "progress": row.get::<_,f64>(4)?,
+                    "started_at": row.get::<_,Option<String>>(5)?,
+                    "estimated_hours": row.get::<_,Option<f64>>(6)?,
+                    "actual_hours": row.get::<_,Option<f64>>(7)?,
+                    "assigned_to": row.get::<_,String>(8)?,
+                    "instance": hostname(),
+                }))) {
+                    for r in rows.flatten() { active_tasks.push(r); }
+                }
+            }
+
+            // Completed tasks with time info
+            let mut completed_tasks: Vec<Value> = Vec::new();
+            let mut total_hours_today: f64 = 0.0;
+            let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+            if let Ok(mut stmt) = db.prepare("SELECT id, title, priority, started_at, completed_at, actual_hours FROM tasks WHERE status IN ('completed','done') AND completed_at LIKE ?1 ORDER BY completed_at DESC LIMIT 30") {
+                let pattern = format!("{}%", today);
+                if let Ok(rows) = stmt.query_map([&pattern], |row| {
+                    let ah: Option<f64> = row.get(5)?;
+                    Ok((json!({
+                        "id": row.get::<_,i64>(0)?,
+                        "title": row.get::<_,String>(1)?,
+                        "priority": row.get::<_,String>(2)?,
+                        "status": "completed",
+                        "started_at": row.get::<_,Option<String>>(3)?,
+                        "completed_at": row.get::<_,Option<String>>(4)?,
+                        "actual_hours": ah,
+                        "instance": hostname(),
+                    }), ah.unwrap_or(0.0)))
+                }) {
+                    for r in rows.flatten() {
+                        completed_tasks.push(r.0);
+                        total_hours_today += r.1;
+                    }
+                }
+            }
+
+            // Merge into task_board: active first, then completed
+            let completed_count = completed_tasks.len();
+            let mut task_board: Vec<Value> = active_tasks;
+            task_board.extend(completed_tasks);
 
             let instance_name = hostname();
             let uptime_s = (chrono::Utc::now() - st.daemon_started).num_seconds() as f64;
@@ -2158,7 +2248,10 @@ pub async fn run(
                 "instance": instance_name,
                 "instances": instances,
                 "tasks": {"total": task_count, "done": done},
-                "task_board": [],
+                "task_board": task_board,
+                "completed_today": completed_count,
+                "total_hours_today": (total_hours_today * 10.0).round() / 10.0,
+                "tasks_in_progress": in_progress,
                 "shared_skills": shared_skills,
                 "timeline": timeline,
             }))
