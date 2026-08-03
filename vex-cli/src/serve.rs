@@ -1550,6 +1550,7 @@ pub async fn run(
             deadline TEXT,
             estimated_hours REAL,
             actual_hours REAL,
+            embedding TEXT DEFAULT NULL,
             meta TEXT DEFAULT '{}'
         );
         CREATE TABLE IF NOT EXISTS projects (
@@ -1637,6 +1638,9 @@ pub async fn run(
             written_to_disk INTEGER DEFAULT 0
         );",
     )?;
+
+    // Migration: add embedding column if upgrading from older schema
+    conn.execute("ALTER TABLE tasks ADD COLUMN embedding TEXT DEFAULT NULL", []).ok();
 
     let td = TemporalDepth::new(&home);
 
@@ -1829,6 +1833,35 @@ pub async fn run(
 
             Json(serde_json::Value::Array(rows))
         }))
+        .route("/tasks/search", get(|
+            State(st): State<Arc<AppState>>,
+            axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String,String>>,
+        | async move {
+            let q = params.get("q").map(|s| s.as_str()).unwrap_or("");
+            if q.is_empty() { return Json(json!({"ok":true,"results":[],"note":"no query"})); }
+            let query_emb = embed::embed_text(q).await;
+            let rows: Vec<(i64, String, String, String, String, Option<String>, Option<f64>)> = {
+                let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
+                let mut stmt = db.prepare("SELECT id, title, description, status, priority, embedding, actual_hours FROM tasks WHERE embedding IS NOT NULL LIMIT 200").unwrap();
+                stmt.query_map([], |row| Ok((
+                    row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?,
+                ))).unwrap().filter_map(|r| r.ok()).collect()
+            };
+            let mut results: Vec<Value> = Vec::new();
+            if let Some(ref q_emb) = query_emb {
+                for (tid, title, _desc, status, priority, emb_json, hours) in &rows {
+                    if let Some(emb_str) = emb_json {
+                        if let Some(mem_emb) = embed::decode_embedding(emb_str) {
+                            let sim = embed::cosine_similarity(q_emb, &mem_emb);
+                            results.push(json!({"id":tid,"title":title,"status":status,"priority":priority,"score":(sim*1000.0).round()/1000.0,"hours":hours}));
+                        }
+                    }
+                }
+            }
+            results.sort_by(|a,b| b["score"].as_f64().unwrap_or(0.0).partial_cmp(&a["score"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+            results.truncate(10);
+            Json(json!({"ok":true,"query":q,"results":results,"semantic":query_emb.is_some()}))
+        }))
         .route("/tasks/stats", get(|
             State(st): State<Arc<AppState>>,
         | async move {
@@ -1941,6 +1974,27 @@ pub async fn run(
             if status == "in_progress" {
                 db.execute("UPDATE tasks SET started_at=?1 WHERE id=?2", rusqlite::params![now, new_id]).ok();
             }
+            // Background: generate embedding for semantic search
+            let task_title = title.to_string();
+            let task_desc = payload["description"].as_str().unwrap_or("").to_string();
+            let task_id = new_id;
+            tokio::spawn(async move {
+                let full_text = format!("{} {}", task_title, task_desc);
+                let embedding = embed::embed_text(&full_text).await;
+                if let Some(vec) = embedding {
+                    let emb_json = embed::encode_embedding(&vec);
+                    // Use a new connection — we can't share the locked db
+                    if let Ok(conn) = rusqlite::Connection::open(
+                        std::env::var("VEX_HOME").map(std::path::PathBuf::from).unwrap_or_else(|_| {
+                            let mut h = crate::client::dirs_fallback();
+                            h.push("vex");
+                            h
+                        }).join("vex.db")
+                    ) {
+                        conn.execute("UPDATE tasks SET embedding=?1 WHERE id=?2", rusqlite::params![emb_json, task_id]).ok();
+                    }
+                }
+            });
             (StatusCode::OK, Json(json!({"ok":true,"id":new_id})))
         }))
         .route("/tasks/{id}", get(|
@@ -2001,6 +2055,24 @@ pub async fn run(
                 if s == "done" || s == "completed" {
                     db.execute("UPDATE tasks SET completed_at=?1, updated_at=?1 WHERE id=?2", rusqlite::params![now, id]).ok();
                 }
+            }
+            // Re-embed if title or description changed
+            let title_changed = payload["title"].as_str().map(|_| true).unwrap_or(false);
+            let desc_changed = payload["description"].as_str().map(|_| true).unwrap_or(false);
+            if title_changed || desc_changed {
+                let new_title = payload["title"].as_str().unwrap_or("").to_string();
+                let new_desc = payload["description"].as_str().unwrap_or("").to_string();
+                let task_id = id;
+                let home = st.home.clone();
+                tokio::spawn(async move {
+                    let full_text = format!("{} {}", new_title, new_desc);
+                    if let Some(vec) = embed::embed_text(&full_text).await {
+                        let emb_json = embed::encode_embedding(&vec);
+                        if let Ok(conn) = rusqlite::Connection::open(home.join("vex.db")) {
+                            conn.execute("UPDATE tasks SET embedding=?1 WHERE id=?2", rusqlite::params![emb_json, task_id]).ok();
+                        }
+                    }
+                });
             }
             (StatusCode::OK, Json(json!({"ok":true})))
         }))
