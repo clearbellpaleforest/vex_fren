@@ -405,6 +405,12 @@ async fn post_memory(
         (StatusCode::BAD_REQUEST, Json(serde_json::json!({"ok": false, "error": "invalid JSON"})))
     })?;
 
+    // Respect source_instance if the relay already set it; otherwise claim as ours
+    let source_instance = entry.get("source_instance")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(hostname);
+
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let dir = memory_dir(&state.home);
     std::fs::create_dir_all(&dir).map_err(|_| (
@@ -416,6 +422,7 @@ async fn post_memory(
     let record = serde_json::json!({
         "date": today,
         "timestamp": chrono::Utc::now().to_rfc3339(),
+        "source_instance": source_instance,
         "summary": entry.get("summary").and_then(|v| v.as_str()).unwrap_or(""),
         "decisions": entry.get("decisions").cloned().unwrap_or(serde_json::json!([])),
         "skills": entry.get("skills").cloned().unwrap_or(serde_json::json!({})),
@@ -455,10 +462,164 @@ async fn post_memory(
         }
     });
 
+    // Relay to all peers — only for locally-originated entries (don't re-relay)
+    if source_instance == hostname() {
+        let relay_record = record.clone();
+        tokio::spawn(async move {
+            relay_memory_to_peers(&relay_record).await;
+        });
+    }
+
     Ok(Json(serde_json::json!({
         "ok": true,
         "written": path.to_string_lossy().to_string(),
+        "source_instance": source_instance,
     })))
+}
+
+/// Push a memory record to every configured peer's /memory endpoint.
+/// Best-effort: failures are logged, never returned to the caller.
+async fn relay_memory_to_peers(record: &Value) {
+    let home = std::env::var("VEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let mut h = crate::client::dirs_fallback();
+            h.push("vex");
+            h
+        });
+
+    let cfg = load_peers_config(&home);
+    let peers_obj = match cfg.get("peers").and_then(|p| p.as_object()) {
+        Some(obj) => obj.clone(),
+        None => return,
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    for (name, peer) in peers_obj.iter() {
+        let url = match peer["url"].as_str() {
+            Some(u) => u.trim_end_matches('/'),
+            None => continue,
+        };
+        let token = peer["token"].as_str().unwrap_or("");
+
+        let payload = match serde_json::to_string(record) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        match client
+            .post(format!("{}/memory", url))
+            .header("Authorization", format!("Bearer {}", token))
+            .header("Content-Type", "application/json")
+            .body(payload.clone())
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                eprintln!("[memory-relay] → {} ({}) ok", name, url);
+            }
+            Ok(resp) => {
+                eprintln!("[memory-relay] → {} ({}) failed: {}", name, url, resp.status());
+            }
+            Err(e) => {
+                eprintln!("[memory-relay] → {} ({}) unreachable: {}", name, url, e);
+            }
+        }
+    }
+}
+
+/// Pull recent memory from every configured peer and store it locally.
+/// Best-effort: peers that are down are skipped. Only fetches entries from
+/// the last 3 days to keep the pull lightweight.
+async fn pull_memory_from_peers(state: &Arc<AppState>) {
+    let cfg = load_peers_config(&state.home);
+    let peers_obj = match cfg.get("peers").and_then(|p| p.as_object()) {
+        Some(obj) => obj.clone(),
+        None => return,
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    for (name, peer) in peers_obj.iter() {
+        let url = match peer["url"].as_str() {
+            Some(u) => u.trim_end_matches('/'),
+            None => continue,
+        };
+        let token = peer["token"].as_str().unwrap_or("");
+
+        match client
+            .get(format!("{}/memory/recent", url))
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status().is_success() => {
+                match resp.json::<Value>().await {
+                    Ok(data) => {
+                        if let Some(entries) = data.as_array() {
+                            let mut stored = 0usize;
+                            for entry in entries {
+                                // Skip entries we already originated — they came back in a relay loop
+                                if entry.get("source_instance").and_then(|v| v.as_str()) == Some(&hostname()) {
+                                    continue;
+                                }
+                                // Write to local memory store
+                                if let Ok(record_str) = json_string(entry) {
+                                    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                                    let dir = memory_dir(&state.home);
+                                    if std::fs::create_dir_all(&dir).is_ok() {
+                                        let path = dir.join(format!("{}.jsonl", today));
+                                        if let Ok(mut f) = std::fs::OpenOptions::new()
+                                            .create(true).append(true).open(&path)
+                                        {
+                                            use std::io::Write;
+                                            let _ = writeln!(f, "{}", record_str);
+                                            stored += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            if stored > 0 {
+                                eprintln!("[memory-pull] ← {} entries from {} ({})", stored, name, url);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[memory-pull] ← {} ({}) bad response: {}", name, url, e);
+                    }
+                }
+            }
+            Ok(resp) => {
+                eprintln!("[memory-pull] ← {} ({}) failed: {}", name, url, resp.status());
+            }
+            Err(e) => {
+                eprintln!("[memory-pull] ← {} ({}) unreachable: {}", name, url, e);
+            }
+        }
+    }
+}
+
+/// GET /memory/pull — manually trigger a pull from all peers
+async fn get_memory_pull(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    check_auth(&headers, &state.token)?;
+    pull_memory_from_peers(&state).await;
+    Ok(Json(serde_json::json!({"ok": true, "note": "pull complete — check /memory/recent for new entries"})))
 }
 
 async fn post_self_update(
@@ -1490,6 +1651,12 @@ pub async fn run(
         heartbeat_loop(heartbeat_state).await;
     });
 
+    // Pull recent memory from peers on startup (best-effort, background)
+    let pull_state = state.clone();
+    tokio::spawn(async move {
+        pull_memory_from_peers(&pull_state).await;
+    });
+
     let app = Router::new()
         .route("/temporal", get(|
             State(st): State<Arc<AppState>>,
@@ -2287,6 +2454,7 @@ pub async fn run(
         .route("/memory/semantic", get(get_memory_search))
         .route("/diary", post(post_diary))
         .route("/memory", post(post_memory))
+        .route("/memory/pull", post(get_memory_pull))
         .route("/self/update", post(post_self_update))
         .route("/dream", post(post_dream))
         .route("/introspect", post(post_introspect))

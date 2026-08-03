@@ -22,18 +22,17 @@ if ! id vex &>/dev/null; then
     useradd -m -s /bin/bash vex
 fi
 VEX_HOME="/home/vex/vex"
-REPO="https://github.com/clearbellpaleforest/vex.git"
+REPO="https://github.com/clearbellpaleforest/vex_fren.git"
 
 # ── Clone and set up ─────────────────────────────────────────────
 log "Cloning vex_fren..."
 if [[ -d "$VEX_HOME" ]]; then
     cd "$VEX_HOME"
-    git pull origin vex_fren 2>/dev/null || git clone "$REPO" "$VEX_HOME"
+    git pull origin main 2>/dev/null || git clone "$REPO" "$VEX_HOME"
 else
     git clone "$REPO" "$VEX_HOME"
 fi
 cd "$VEX_HOME"
-git checkout vex_fren 2>/dev/null || true
 
 log "Setting up Python venv..."
 python3 -m venv .venv
