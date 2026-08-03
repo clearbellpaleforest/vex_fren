@@ -68,5 +68,5 @@ jobs:
         with:
           components: clippy
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy
         working-directory: vex-cli

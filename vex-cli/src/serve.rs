@@ -2131,36 +2131,48 @@ pub async fn run(
                 }
             }
 
-            // Completed tasks with time info
-            let mut completed_tasks: Vec<Value> = Vec::new();
+            // Completed today (for hours tracking)
+            let mut completed_today_count: usize = 0;
             let mut total_hours_today: f64 = 0.0;
             let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-            if let Ok(mut stmt) = db.prepare("SELECT id, title, priority, started_at, completed_at, actual_hours FROM tasks WHERE status IN ('completed','done') AND completed_at LIKE ?1 ORDER BY completed_at DESC LIMIT 30") {
+            if let Ok(mut stmt) = db.prepare("SELECT id, actual_hours FROM tasks WHERE status IN ('completed','done') AND completed_at LIKE ?1") {
                 let pattern = format!("{}%", today);
                 if let Ok(rows) = stmt.query_map([&pattern], |row| {
-                    let ah: Option<f64> = row.get(5)?;
-                    Ok((json!({
+                    let ah: Option<f64> = row.get(1)?;
+                    Ok(ah.unwrap_or(0.0))
+                }) {
+                    for r in rows.flatten() {
+                        completed_today_count += 1;
+                        total_hours_today += r;
+                    }
+                }
+            }
+
+            // All completed tasks (for visibility — no date filter)
+            let mut completed_tasks: Vec<Value> = Vec::new();
+            if let Ok(mut stmt) = db.prepare("SELECT id, title, priority, started_at, completed_at, actual_hours, status FROM tasks WHERE status IN ('completed','done') ORDER BY completed_at DESC LIMIT 50") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    let completed_date: Option<String> = row.get(4)?;
+                    let is_today = completed_date.as_ref().map(|d| d.starts_with(&today)).unwrap_or(false);
+                    Ok(json!({
                         "id": row.get::<_,i64>(0)?,
                         "title": row.get::<_,String>(1)?,
                         "priority": row.get::<_,String>(2)?,
                         "status": "completed",
                         "started_at": row.get::<_,Option<String>>(3)?,
-                        "completed_at": row.get::<_,Option<String>>(4)?,
-                        "actual_hours": ah,
+                        "completed_at": completed_date,
+                        "actual_hours": row.get::<_,Option<f64>>(5)?,
+                        "is_today": is_today,
                         "instance": hostname(),
-                    }), ah.unwrap_or(0.0)))
+                    }))
                 }) {
-                    for r in rows.flatten() {
-                        completed_tasks.push(r.0);
-                        total_hours_today += r.1;
-                    }
+                    for r in rows.flatten() { completed_tasks.push(r); }
                 }
             }
 
-            // Merge into task_board: active first, then completed
-            let completed_count = completed_tasks.len();
+            // Merge into task_board: active first, then all completed
             let mut task_board: Vec<Value> = active_tasks;
-            task_board.extend(completed_tasks);
+            task_board.extend(completed_tasks.into_iter().take(50));
 
             let instance_name = hostname();
             let uptime_s = (chrono::Utc::now() - st.daemon_started).num_seconds() as f64;
@@ -2249,7 +2261,7 @@ pub async fn run(
                 "instances": instances,
                 "tasks": {"total": task_count, "done": done},
                 "task_board": task_board,
-                "completed_today": completed_count,
+                "completed_today": completed_today_count,
                 "total_hours_today": (total_hours_today * 10.0).round() / 10.0,
                 "tasks_in_progress": in_progress,
                 "shared_skills": shared_skills,

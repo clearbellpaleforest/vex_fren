@@ -26,6 +26,7 @@ struct EmbedResponse {
 }
 
 /// Check if the embedding service is available.
+#[allow(dead_code)]
 pub async fn is_available() -> bool {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))

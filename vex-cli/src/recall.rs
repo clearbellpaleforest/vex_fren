@@ -7,7 +7,7 @@
 //!
 //! Falls back to FTS5 keyword search when embeddings are unavailable.
 
-use crate::embed::{self, cosine_similarity, decode_embedding, EMBED_DIMS};
+use crate::embed::{self, cosine_similarity, decode_embedding};
 use crate::emotion::{query_emotions, Emotion};
 use crate::temporal::{DateRange, parse_temporal};
 use serde::{Deserialize, Serialize};
