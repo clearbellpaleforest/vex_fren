@@ -76,12 +76,16 @@ def fetch_messages(limit: int = 400):
     msgs = data if isinstance(data, list) else data.get("messages", [])
     out = []
     for msg in reversed(msgs):
+        body = redact(msg.get("body", "") or "")
+        # Filter: skip FEN heartbeat ticks
+        if body.startswith("FEN heartbeat"):
+            continue
         out.append({
             "id": msg.get("id", 0),
             "at": (msg.get("created_at", "") or "")[:19].replace("T", " "),
             "sender": msg.get("sender", "?"),
             "recipient": msg.get("recipient", ""),
-            "body": redact(msg.get("body", "")),
+            "body": body,
             "type": msg.get("msg_type", "message"),
             "read": msg.get("read", 0),
         })

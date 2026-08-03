@@ -1904,19 +1904,113 @@ pub async fn run(
             let db = st.db.lock().unwrap_or_else(|e| e.into_inner());
             let task_count: i64 = db.query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0)).unwrap_or(0);
             let done: i64 = db.query_row("SELECT COUNT(*) FROM tasks WHERE status IN ('completed','done')", [], |r| r.get(0)).unwrap_or(0);
+
+            let instance_name = hostname();
+            let uptime_s = (chrono::Utc::now() - st.daemon_started).num_seconds() as f64;
+
+            // Local instance always shown
+            let mut instances: Vec<Value> = vec![json!({
+                "name": instance_name,
+                "is_local": true,
+                "url": format!("http://localhost:8520"),
+                "status": "online",
+                "coherence": compute_coherence(&st.home),
+                "uptime_s": uptime_s,
+                "version": "2.0.0",
+                "skills": [],
+                "tasks": {"total": task_count, "done": done}
+            })];
+
+            // Peers with reachability
             let peers_path = st.home.join("vex_peers.json");
-            let peers: Vec<Value> = std::fs::read_to_string(&peers_path).ok()
-                .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-                .and_then(|v| v["peers"].as_object().map(|o| o.keys().map(|k| json!({"name":k})).collect()))
-                .unwrap_or_default();
+            if let Ok(raw) = std::fs::read_to_string(&peers_path) {
+                if let Ok(cfg) = serde_json::from_str::<Value>(&raw) {
+                    if let Some(obj) = cfg["peers"].as_object() {
+                        for (name, peer) in obj {
+                            let url = peer["url"].as_str().unwrap_or("");
+                            let reachable = std::process::Command::new("curl")
+                                .args(["-sf", &format!("{}/health", url), "--connect-timeout", "2"])
+                                .output()
+                                .map(|o| o.status.success())
+                                .unwrap_or(false);
+                            instances.push(json!({
+                                "name": name,
+                                "given_name": peer.get("given_name"),
+                                "is_local": false,
+                                "url": url,
+                                "status": if reachable { "online" } else { "offline" },
+                                "coherence": 0.0,
+                                "uptime_s": 0.0,
+                                "version": "?",
+                                "skills": [],
+                                "tasks": {"total": 0, "done": 0}
+                            }));
+                        }
+                    }
+                }
+            }
             drop(db);
-            Json(json!({"ok":true,"instance":hostname(),"peers":peers,"tasks":{"total":task_count,"done":done},"skills":[],"timeline":[]}))
+
+            // Timeline from session log
+            let mut timeline: Vec<Value> = Vec::new();
+            let sessions_path = st.home.join("vex_workspace").join("vex_sessions.jsonl");
+            if let Ok(content) = std::fs::read_to_string(&sessions_path) {
+                for line in content.lines().rev().take(20) {
+                    if let Ok(entry) = serde_json::from_str::<Value>(line) {
+                        timeline.push(json!({
+                            "session": entry.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
+                            "number": entry.get("number").and_then(|v| v.as_i64()).unwrap_or(0),
+                            "instance": &instance_name,
+                            "started": entry.get("started").and_then(|v| v.as_str()).unwrap_or(""),
+                        }));
+                    }
+                }
+            }
+
+            // Aggregate skills from self model
+            let mut shared_skills: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+            let model_path = st.home.join("vex_self_model.json");
+            if let Ok(raw) = std::fs::read_to_string(&model_path) {
+                if let Ok(model) = serde_json::from_str::<Value>(&raw) {
+                    if let Some(caps) = model["capabilities"].as_object() {
+                        for (domain, cap) in caps {
+                            let skill = cap["estimated_skill"].as_f64().unwrap_or(0.0);
+                            let obs = cap["n_observations"].as_i64().unwrap_or(0);
+                            shared_skills.insert(domain.clone(), json!({
+                                "max_skill": skill,
+                                "total_obs": obs,
+                                "instances": [&instance_name]
+                            }));
+                        }
+                    }
+                }
+            }
+
+            Json(json!({
+                "ok": true,
+                "instance": instance_name,
+                "instances": instances,
+                "tasks": {"total": task_count, "done": done},
+                "task_board": [],
+                "shared_skills": shared_skills,
+                "timeline": timeline,
+            }))
         }))
         .route("/bus", get(|State(st): State<Arc<AppState>>| async move {
             let bus_path = st.home.join("vex_workspace").join("vex_bus.jsonl");
             let lines: Vec<Value> = std::fs::read_to_string(&bus_path).unwrap_or_default()
-                .lines().rev().take(50)
+                .lines().rev().take(200)
                 .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+                .filter(|v| {
+                    // Filter out FEN heartbeat spam — these are system ticks, not messages
+                    let body = v["body"].as_str().unwrap_or("");
+                    let msg_type = v["type"].as_str().unwrap_or("");
+                    if msg_type == "message" && body.starts_with("FEN heartbeat") {
+                        return false;
+                    }
+                    true
+                })
+                .take(50)
                 .collect();
             Json(json!({"ok":true,"lines":lines}))
         }))
