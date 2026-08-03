@@ -11,8 +11,8 @@
 use serde::{Deserialize, Serialize};
 
 const OLLAMA_URL: &str = "http://localhost:11434/api/embeddings";
-const EMBED_MODEL: &str = "all-minilm:latest";
-pub const EMBED_DIMS: usize = 384;
+const EMBED_MODEL: &str = "nomic-embed-text:latest";
+pub const EMBED_DIMS: usize = 768;
 
 #[derive(Debug, Serialize)]
 struct EmbedRequest {

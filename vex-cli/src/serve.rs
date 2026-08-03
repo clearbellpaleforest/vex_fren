@@ -339,11 +339,14 @@ async fn get_memory_search(
     };
 
     let output: Vec<Value> = results.into_iter().take(query.limit).map(|r| {
+        // Calculate individual axis scores for transparency
+        let sem_score = if embeddings_available { r.score * 0.5 } else { 0.0 };
         serde_json::json!({
             "date": r.date,
             "summary": r.summary,
             "entry": r.entry,
             "score": (r.score * 1000.0).round() / 1000.0,
+            "semantic": (sem_score * 1000.0).round() / 1000.0,
             "emotion": r.emotion,
             "matched_emotion": r.matched_emotion,
             "in_time_range": r.in_time_range,
@@ -2220,21 +2223,65 @@ pub async fn run(
             }
             drop(db);
 
-            // Timeline from session log
+            // Timeline from session log + bus handoffs
             let mut timeline: Vec<Value> = Vec::new();
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            // 1. Local sessions file
             let sessions_path = st.home.join("vex_workspace").join("vex_sessions.jsonl");
             if let Ok(content) = std::fs::read_to_string(&sessions_path) {
                 for line in content.lines().rev().take(20) {
                     if let Ok(entry) = serde_json::from_str::<Value>(line) {
+                        let key = format!("{}:{}", &instance_name, entry.get("name").and_then(|v| v.as_str()).unwrap_or("?"));
+                        if !seen.contains(&key) {
+                            seen.insert(key);
+                            timeline.push(json!({
+                                "session": entry.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
+                                "number": entry.get("number").and_then(|v| v.as_i64()).unwrap_or(0),
+                                "instance": &instance_name,
+                                "started": entry.get("started").and_then(|v| v.as_str()).unwrap_or(""),
+                            }));
+                        }
+                    }
+                }
+            }
+
+            // 2. Bus handoffs from all instances
+            let bus_path = st.home.join("vex_workspace").join("vex_bus.jsonl");
+            if let Ok(content) = std::fs::read_to_string(&bus_path) {
+                for line in content.lines().rev().take(500) {
+                    if let Ok(entry) = serde_json::from_str::<Value>(line) {
+                        if entry.get("type").and_then(|v| v.as_str()) != Some("handoff") { continue; }
+                        let from = entry.get("from").and_then(|v| v.as_str()).unwrap_or("");
+                        // Parse vex@instance/session format
+                        let parts: Vec<&str> = from.splitn(2, '@').collect();
+                        if parts.len() < 2 { continue; }
+                        let inst = parts[1].split('/').next().unwrap_or(parts[1]);
+                        let sess = parts[1].split('/').nth(1).unwrap_or("?");
+                        let key = format!("{}:{}", inst, sess);
+                        if seen.contains(&key) { continue; }
+                        seen.insert(key);
                         timeline.push(json!({
-                            "session": entry.get("name").and_then(|v| v.as_str()).unwrap_or("?"),
-                            "number": entry.get("number").and_then(|v| v.as_i64()).unwrap_or(0),
-                            "instance": &instance_name,
-                            "started": entry.get("started").and_then(|v| v.as_str()).unwrap_or(""),
+                            "session": sess,
+                            "number": 0,
+                            "instance": inst,
+                            "started": entry.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
                         }));
                     }
                 }
             }
+
+            // Sort by started desc, cap at 30
+            timeline.sort_by(|a,b| {
+                let sa = a["started"].as_str().unwrap_or("");
+                let sb = b["started"].as_str().unwrap_or("");
+                sb.cmp(&sa)
+            });
+            timeline.truncate(30);
+
+            // Calculate session work time from daemon uptime (not fake task hours)
+            let session_hours = (chrono::Utc::now() - st.daemon_started).num_minutes() as f64 / 60.0;
+            let work_time = if session_hours > total_hours_today { session_hours } else { total_hours_today };
 
             // Aggregate skills from self model
             let mut shared_skills: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
@@ -2262,7 +2309,7 @@ pub async fn run(
                 "tasks": {"total": task_count, "done": done},
                 "task_board": task_board,
                 "completed_today": completed_today_count,
-                "total_hours_today": (total_hours_today * 10.0).round() / 10.0,
+                "total_hours_today": (work_time * 10.0).round() / 10.0,
                 "tasks_in_progress": in_progress,
                 "shared_skills": shared_skills,
                 "timeline": timeline,
